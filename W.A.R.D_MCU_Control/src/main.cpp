@@ -9,6 +9,7 @@ void setup() {
   while(!Serial) delay(10);
 
   Serial.println("MCP2515 Sender test!");
+  pinMode(13, OUTPUT);
 
   if (!telemetry.begin(CAN_BAUDRATE)) 
   {
@@ -20,6 +21,17 @@ void setup() {
 
 void loop() 
 {
+  static unsigned long previousMillis = 0;
+  const long interval = 1000; // 1 second
+  unsigned long currentMillis = millis();
+
+  if (currentMillis - previousMillis >= interval) {
+    previousMillis = currentMillis;
+    static bool ledState = LOW;
+    ledState = !ledState;
+    digitalWrite(13, ledState);
+  }
+
    if(telemetry.receive()) 
    {
        Serial.print("Received packet with ID 0x");
