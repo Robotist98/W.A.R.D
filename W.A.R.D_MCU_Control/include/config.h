@@ -20,4 +20,14 @@
 #define SPI_SCK_PIN 14
 #define SPI_CAN_CS_PIN 19
 
+#define MAIN_POWER_PIN 6
+
+#define X_AXIS_STEP_PIN 2
+#define X_AXIS_DIR_PIN 3
+#define X_AXIS_ENABLE_PIN 4
+
+#define Y_AXIS_STEP_PIN 10
+#define Y_AXIS_DIR_PIN 11
+#define Y_AXIS_ENABLE_PIN 12
+
 #endif // CONFIG_H
