@@ -12,8 +12,20 @@ AccelStepper stepperY(AccelStepper::DRIVER, Y_AXIS_STEP_PIN, Y_AXIS_DIR_PIN);
 Servo triggerServo;
 
 constexpr long kStepDelta = 100;
-bool xPositive = true;
-bool yPositive = true;
+
+constexpr uint8_t kCmdSetPower = 0x10;
+constexpr uint8_t kCmdMoveX = 0x11;
+constexpr uint8_t kCmdMoveY = 0x12;
+constexpr uint8_t kCmdSetServo = 0x13;
+
+bool readInt16(size_t offset, int16_t &value) {
+  uint16_t raw = 0;
+  if (!telemetry.getUint16(offset, raw)) {
+    return false;
+  }
+  value = static_cast<int16_t>(raw);
+  return true;
+}
 
 void setup() {
   Serial.begin(115200);
@@ -47,50 +59,73 @@ void setup() {
 
   stepperX.setCurrentPosition(0);
   stepperY.setCurrentPosition(0);
-  stepperX.move(kStepDelta);
-  stepperY.move(kStepDelta);
   Serial.println("Setup complete.");
 
 }
 
 void loop() 
 {
-  static unsigned long previousMillis = 0;
-  const long interval = 1000; // 1 second
-  unsigned long currentMillis = millis();
-
-  if (currentMillis - previousMillis >= interval) {
-    previousMillis = currentMillis;
-    static bool ledState = LOW;
-    ledState = !ledState;
-    digitalWrite(13, ledState);
-  }
-
   stepperX.run();
   stepperY.run();
-  if (stepperX.distanceToGo() == 0) {
-    xPositive = !xPositive;
-    stepperX.move(xPositive ? kStepDelta : -kStepDelta);
-  }
-  if (stepperY.distanceToGo() == 0) {
-    yPositive = !yPositive;
-    stepperY.move(yPositive ? kStepDelta : -kStepDelta);
-  }
 
-   if(telemetry.receive()) 
-   {
-       Serial.print("Received packet with ID 0x");
-       Serial.print(telemetry.getLastReceivedId(), HEX);
-       Serial.print(" and data: ");
-       size_t len = telemetry.getReceivedSize();
-       for (size_t i = 0; i < len; i++) {
-           uint8_t byte;
-           if (telemetry.getUint8(i, byte)) {
-               Serial.print("0x");
-               Serial.print(byte, HEX);
-               Serial.print(" ");
-           }
-       }
-       Serial.println();
-   }
+  if (telemetry.receive()) {
+    const uint32_t cmd = telemetry.getLastReceivedId();
+    switch (cmd) {
+      case CAN_CMD_PTM_STOP: {
+        stepperX.stop();
+        stepperY.stop();
+        stepperX.moveTo(stepperX.currentPosition());
+        stepperY.moveTo(stepperY.currentPosition());
+        digitalWrite(MAIN_POWER_PIN, LOW);
+        break;
+      }
+      case CAN_CMD_PTM_START_FW:
+      case CAN_CMD_PTM_START_REV: {
+        digitalWrite(MAIN_POWER_PIN, HIGH);
+        int16_t delta = static_cast<int16_t>(kStepDelta);
+        if (!readInt16(0, delta)) {
+          delta = static_cast<int16_t>(kStepDelta);
+        }
+        if (cmd == CAN_CMD_PTM_START_REV) {
+          delta = static_cast<int16_t>(-delta);
+        }
+        stepperX.move(delta);
+        stepperY.move(delta);
+        break;
+      }
+      case kCmdSetPower: {
+        uint8_t state = 0;
+        if (telemetry.getUint8(0, state)) {
+          digitalWrite(MAIN_POWER_PIN, state ? HIGH : LOW);
+        }
+        break;
+      }
+      case kCmdMoveX: {
+        int16_t delta = 0;
+        if (readInt16(0, delta)) {
+          stepperX.move(delta);
+        }
+        break;
+      }
+      case kCmdMoveY: {
+        int16_t delta = 0;
+        if (readInt16(0, delta)) {
+          stepperY.move(delta);
+        }
+        break;
+      }
+      case kCmdSetServo: {
+        uint8_t angle = 0;
+        if (telemetry.getUint8(0, angle)) {
+          if (angle > 180) {
+            angle = 180;
+          }
+          triggerServo.write(angle);
+        }
+        break;
+      }
+      default:
+        break;
+    }
+  }
 }
