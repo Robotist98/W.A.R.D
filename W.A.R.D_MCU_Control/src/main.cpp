@@ -2,23 +2,18 @@
 #include "adafruit_telemetry.h"
 #include "config.h"
 #include "AccelStepper.h"
-#include "Adafruit_PWMServoDriver.h"
+#include <Servo.h>
 
 Telemetry telemetry(SPI_CAN_CS_PIN, SPI_MISO_PIN, SPI_MOSI_PIN, SPI_SCK_PIN);
 UniversalPacker packer;
 
 AccelStepper stepperX(AccelStepper::DRIVER, X_AXIS_STEP_PIN, X_AXIS_DIR_PIN);
 AccelStepper stepperY(AccelStepper::DRIVER, Y_AXIS_STEP_PIN, Y_AXIS_DIR_PIN);
-Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
+Servo triggerServo;
 
 constexpr long kStepDelta = 100;
 bool xPositive = true;
 bool yPositive = true;
-
-static uint16_t servoPulseForAngle(uint8_t angle) {
-  angle = constrain(angle, 0, 180);
-  return map(angle, 0, 180, SERVO_MIN_PULSE, SERVO_MAX_PULSE);
-}
 
 void setup() {
   Serial.begin(115200);
@@ -45,11 +40,10 @@ void setup() {
   stepperY.setMaxSpeed(800);      // Less speed if lower microstepping
   stepperY.setAcceleration(250);
 
-  pwm.begin();
-  pwm.setPWMFreq(50);
-  pwm.setPWM(SERVO_TRIGGER_CHANNEL, 0, servoPulseForAngle(0));
+  triggerServo.attach(SERVO_TRIGGER_PIN);
+  triggerServo.write(0);
   delay(500);
-  pwm.setPWM(SERVO_TRIGGER_CHANNEL, 0, servoPulseForAngle(180));
+  triggerServo.write(180);
 
   stepperX.setCurrentPosition(0);
   stepperY.setCurrentPosition(0);
