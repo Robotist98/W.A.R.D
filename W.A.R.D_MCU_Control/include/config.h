@@ -22,12 +22,14 @@
 
 #define MAIN_POWER_PIN 6
 
-#define X_AXIS_STEP_PIN 2
-#define X_AXIS_DIR_PIN 3
-#define X_AXIS_ENABLE_PIN 4
+#define SERVO_TRIGGER_PIN 25
 
-#define Y_AXIS_STEP_PIN 10
-#define Y_AXIS_DIR_PIN 11
-#define Y_AXIS_ENABLE_PIN 12
+#define X_AXIS_STEP_PIN 11
+#define X_AXIS_DIR_PIN 10
+//#define X_AXIS_ENABLE_PIN
+
+#define Y_AXIS_STEP_PIN 13
+#define Y_AXIS_DIR_PIN 12
+//#define Y_AXIS_ENABLE_PIN 
 
 #endif // CONFIG_H
