@@ -2,14 +2,12 @@
 #include "adafruit_telemetry.h"
 #include "config.h"
 #include "AccelStepper.h"
-#include "Servo.h"
 
 Telemetry telemetry(SPI_CAN_CS_PIN, SPI_MISO_PIN, SPI_MOSI_PIN, SPI_SCK_PIN);
 UniversalPacker packer;
 
 AccelStepper stepperX(AccelStepper::DRIVER, X_AXIS_STEP_PIN, X_AXIS_DIR_PIN);
 AccelStepper stepperY(AccelStepper::DRIVER, Y_AXIS_STEP_PIN, Y_AXIS_DIR_PIN);
-Servo triggerServo;
 
 constexpr long kStepDelta = 50;
 bool xPositive = true;
@@ -39,10 +37,6 @@ void setup() {
   // Configure Y-axis motor
   stepperY.setMaxSpeed(800);      // Less speed if lower microstepping
   stepperY.setAcceleration(250);
-
-  // Configure servo
-  triggerServo.attach(SERVO_TRIGGER_PIN);
-  triggerServo.write(0);
 
   stepperX.setCurrentPosition(0);
   stepperY.setCurrentPosition(0);
