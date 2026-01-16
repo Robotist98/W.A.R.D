@@ -1,15 +1,27 @@
 #include <Arduino.h>
 #include "adafruit_telemetry.h"
 #include "config.h"
+#include "AccelStepper.h"
+#include "Servo.h"
 
 Telemetry telemetry(SPI_CAN_CS_PIN, SPI_MISO_PIN, SPI_MOSI_PIN, SPI_SCK_PIN);
 UniversalPacker packer;
+
+AccelStepper stepperX(AccelStepper::DRIVER, X_AXIS_STEP_PIN, X_AXIS_DIR_PIN);
+AccelStepper stepperY(AccelStepper::DRIVER, Y_AXIS_STEP_PIN, Y_AXIS_DIR_PIN);
+Servo triggerServo;
+
+constexpr long kStepDelta = 50;
+bool xPositive = true;
+bool yPositive = true;
+
 void setup() {
   Serial.begin(115200);
   while(!Serial) delay(10);
 
   Serial.println("MCP2515 Sender test!");
   pinMode(13, OUTPUT);
+  pinMode(MAIN_POWER_PIN, OUTPUT);
 
   if (!telemetry.begin(CAN_BAUDRATE)) 
   {
@@ -17,6 +29,27 @@ void setup() {
     while (1);
   }
   packer.clear();
+
+  digitalWrite(MAIN_POWER_PIN, HIGH);
+  delay(100);
+
+  stepperX.setMaxSpeed(1000);     // Max steps/sec
+  stepperX.setAcceleration(300);  // Smoother movement
+
+  // Configure Y-axis motor
+  stepperY.setMaxSpeed(800);      // Less speed if lower microstepping
+  stepperY.setAcceleration(250);
+
+  // Configure servo
+  triggerServo.attach(SERVO_TRIGGER_PIN);
+  triggerServo.write(0);
+
+  stepperX.setCurrentPosition(0);
+  stepperY.setCurrentPosition(0);
+  stepperX.move(kStepDelta);
+  stepperY.move(kStepDelta);
+
+
 }
 
 void loop() 
@@ -30,6 +63,17 @@ void loop()
     static bool ledState = LOW;
     ledState = !ledState;
     digitalWrite(13, ledState);
+  }
+
+  stepperX.run();
+  stepperY.run();
+  if (stepperX.distanceToGo() == 0) {
+    xPositive = !xPositive;
+    stepperX.move(xPositive ? kStepDelta : -kStepDelta);
+  }
+  if (stepperY.distanceToGo() == 0) {
+    yPositive = !yPositive;
+    stepperY.move(yPositive ? kStepDelta : -kStepDelta);
   }
 
    if(telemetry.receive()) 
