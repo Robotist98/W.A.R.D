@@ -9,7 +9,7 @@ UniversalPacker packer;
 AccelStepper stepperX(AccelStepper::DRIVER, X_AXIS_STEP_PIN, X_AXIS_DIR_PIN);
 AccelStepper stepperY(AccelStepper::DRIVER, Y_AXIS_STEP_PIN, Y_AXIS_DIR_PIN);
 
-constexpr long kStepDelta = 50;
+constexpr long kStepDelta = 100;
 bool xPositive = true;
 bool yPositive = true;
 
@@ -28,7 +28,7 @@ void setup() {
   }
   packer.clear();
 
-  digitalWrite(MAIN_POWER_PIN, HIGH);
+  digitalWrite(MAIN_POWER_PIN, LOW);
   delay(100);
 
   stepperX.setMaxSpeed(1000);     // Max steps/sec
@@ -42,7 +42,7 @@ void setup() {
   stepperY.setCurrentPosition(0);
   stepperX.move(kStepDelta);
   stepperY.move(kStepDelta);
-
+  Serial.println("Setup complete.");
 
 }
 

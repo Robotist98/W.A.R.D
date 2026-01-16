@@ -24,12 +24,12 @@
 
 #define SERVO_TRIGGER_PIN 25
 
-#define X_AXIS_STEP_PIN 11
-#define X_AXIS_DIR_PIN 10
+#define X_AXIS_STEP_PIN D11
+#define X_AXIS_DIR_PIN D10
 //#define X_AXIS_ENABLE_PIN
 
-#define Y_AXIS_STEP_PIN 13
-#define Y_AXIS_DIR_PIN 12
+#define Y_AXIS_STEP_PIN D13
+#define Y_AXIS_DIR_PIN D12
 //#define Y_AXIS_ENABLE_PIN 
 
 #endif // CONFIG_H
