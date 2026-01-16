@@ -22,7 +22,7 @@
 
 #define MAIN_POWER_PIN 6
 
-#define SERVO_TRIGGER_PIN 25
+#define SERVO_TRIGGER_PIN 26
 
 #define X_AXIS_STEP_PIN D11
 #define X_AXIS_DIR_PIN D10
