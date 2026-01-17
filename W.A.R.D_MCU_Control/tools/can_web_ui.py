@@ -352,6 +352,7 @@ def get_camera():
 
 @app.route("/api/camera", methods=["POST"])
 def api_camera():
+  global camera_index, camera_width, camera_height, camera_fps, camera
   data = request.get_json(silent=True) or {}
   index = int(data.get("index", camera_index))
   width = int(data.get("width", camera_width))
@@ -361,8 +362,6 @@ def api_camera():
   width = max(160, min(width, 1920))
   height = max(120, min(height, 1080))
   fps = max(1, min(fps, 60))
-
-  global camera_index, camera_width, camera_height, camera_fps, camera
   camera_index = index
   camera_width = width
   camera_height = height
