@@ -29,7 +29,7 @@ bool readInt16(size_t offset, int16_t &value) {
 
 void setup() {
   Serial.begin(115200);
-  while(!Serial) delay(10);
+  //while(!Serial) delay(10);
 
   Serial.println("MCP2515 Sender test!");
   pinMode(13, OUTPUT);
@@ -53,9 +53,9 @@ void setup() {
   stepperY.setAcceleration(250);
 
   triggerServo.attach(SERVO_TRIGGER_PIN);
-  triggerServo.write(0);
-  delay(500);
-  triggerServo.write(180);
+  triggerServo.write(100);
+  // delay(500);
+  // triggerServo.write(180);
 
   stepperX.setCurrentPosition(0);
   stepperY.setCurrentPosition(0);
