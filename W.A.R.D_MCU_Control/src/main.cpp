@@ -17,6 +17,8 @@ constexpr uint8_t kCmdSetPower = 0x10;
 constexpr uint8_t kCmdMoveX = 0x11;
 constexpr uint8_t kCmdMoveY = 0x12;
 constexpr uint8_t kCmdSetServo = 0x13;
+constexpr uint8_t kServoMinAngle = 0x5A;  // 90 degrees
+constexpr uint8_t kServoMaxAngle = 0x91;  // 145 degrees
 
 bool readInt16(size_t offset, int16_t &value) {
   uint16_t raw = 0;
@@ -117,8 +119,10 @@ void loop()
       case kCmdSetServo: {
         uint8_t angle = 0;
         if (telemetry.getUint8(0, angle)) {
-          if (angle > 180) {
-            angle = 180;
+          if (angle < kServoMinAngle) {
+            angle = kServoMinAngle;
+          } else if (angle > kServoMaxAngle) {
+            angle = kServoMaxAngle;
           }
           triggerServo.write(angle);
         }
