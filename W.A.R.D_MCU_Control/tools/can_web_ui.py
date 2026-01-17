@@ -1,6 +1,9 @@
 import argparse
 import struct
 import threading
+import time
+
+import cv2
 
 import can
 from flask import Flask, jsonify, render_template_string, request
@@ -140,7 +143,37 @@ APP_HTML = """<!doctype html>
           <input id="servoAngle" type="range" min="90" max="145" value="100" oninput="servoValue.textContent = this.value" />
           <div class="status">Angle: <span id="servoValue">100</span></div>
           <button onclick="setServo()">Set Servo</button>
+          <button onclick="fireServo()">Fire</button>
           <div class="status" id="servoStatus">Idle</div>
+        </div>
+        <div class="card">
+          <label>Fire Settings</label>
+          <label for="fireForward">Forward Angle</label>
+          <input id="fireForward" type="number" min="90" max="145" value="145" />
+          <label for="fireBack">Return Angle</label>
+          <input id="fireBack" type="number" min="90" max="145" value="90" />
+          <label for="fireDelay">Delay (sec)</label>
+          <input id="fireDelay" type="number" min="0" max="5" step="0.05" value="0.30" />
+          <button onclick="setFireConfig()">Apply Fire Settings</button>
+          <div class="status" id="fireStatus">Idle</div>
+        </div>
+        <div class="card">
+          <label>Camera Stream</label>
+          <img src="/stream.mjpg" alt="Camera stream" style="width: 100%; border-radius: 12px; border: 1px solid #203445;" />
+          <div class="status">MJPEG stream</div>
+        </div>
+        <div class="card">
+          <label>Camera Settings</label>
+          <label for="camIndex">Index</label>
+          <input id="camIndex" type="number" min="0" max="10" value="0" />
+          <label for="camWidth">Width</label>
+          <input id="camWidth" type="number" min="160" max="1920" value="640" />
+          <label for="camHeight">Height</label>
+          <input id="camHeight" type="number" min="120" max="1080" value="480" />
+          <label for="camFps">FPS</label>
+          <input id="camFps" type="number" min="1" max="60" value="15" />
+          <button onclick="setCamera()">Apply Camera Settings</button>
+          <div class="status" id="cameraStatus">Idle</div>
         </div>
       </div>
     </div>
@@ -172,6 +205,28 @@ APP_HTML = """<!doctype html>
         const data = await postJson("/api/servo", { angle });
         document.getElementById("servoStatus").textContent = data.status;
       }
+
+      async function fireServo() {
+        const data = await postJson("/api/fire", {});
+        document.getElementById("servoStatus").textContent = data.status;
+      }
+
+      async function setFireConfig() {
+        const forward = Number(document.getElementById("fireForward").value);
+        const back = Number(document.getElementById("fireBack").value);
+        const delay = Number(document.getElementById("fireDelay").value);
+        const data = await postJson("/api/fire-config", { forward, back, delay });
+        document.getElementById("fireStatus").textContent = data.status;
+      }
+
+      async function setCamera() {
+        const index = Number(document.getElementById("camIndex").value);
+        const width = Number(document.getElementById("camWidth").value);
+        const height = Number(document.getElementById("camHeight").value);
+        const fps = Number(document.getElementById("camFps").value);
+        const data = await postJson("/api/camera", { index, width, height, fps });
+        document.getElementById("cameraStatus").textContent = data.status;
+      }
     </script>
   </body>
 </html>
@@ -188,10 +243,19 @@ CAN_CMD_SET_SERVO = 0x13
 
 SERVO_MIN = 90
 SERVO_MAX = 145
+SERVO_FIRE_FORWARD = SERVO_MAX
+SERVO_FIRE_RETURN = SERVO_MIN
+SERVO_FIRE_DELAY_SEC = 0.3
 
 app = Flask(__name__)
 bus = None
 bus_lock = threading.Lock()
+camera_lock = threading.Lock()
+camera = None
+camera_index = 0
+camera_width = 640
+camera_height = 480
+camera_fps = 15
 
 
 def clamp(value, min_value, max_value):
@@ -244,17 +308,119 @@ def api_servo():
   return jsonify(status=f"Servo angle {angle} sent")
 
 
+def fire_servo_sequence():
+  send_can(CAN_CMD_SET_SERVO, bytes([SERVO_FIRE_FORWARD]))
+  time.sleep(SERVO_FIRE_DELAY_SEC)
+  send_can(CAN_CMD_SET_SERVO, bytes([SERVO_FIRE_RETURN]))
+
+
+@app.route("/api/fire", methods=["POST"])
+def api_fire():
+  threading.Thread(target=fire_servo_sequence, daemon=True).start()
+  return jsonify(status="Fire sequence sent")
+
+
+@app.route("/api/fire-config", methods=["POST"])
+def api_fire_config():
+  data = request.get_json(silent=True) or {}
+  forward = int(data.get("forward", SERVO_FIRE_FORWARD))
+  back = int(data.get("back", SERVO_FIRE_RETURN))
+  delay = float(data.get("delay", SERVO_FIRE_DELAY_SEC))
+
+  forward = clamp(forward, SERVO_MIN, SERVO_MAX)
+  back = clamp(back, SERVO_MIN, SERVO_MAX)
+  delay = max(0.0, min(delay, 5.0))
+
+  global SERVO_FIRE_FORWARD, SERVO_FIRE_RETURN, SERVO_FIRE_DELAY_SEC
+  SERVO_FIRE_FORWARD = forward
+  SERVO_FIRE_RETURN = back
+  SERVO_FIRE_DELAY_SEC = delay
+
+  return jsonify(status=f"Fire config set (fwd {forward}, back {back}, delay {delay:.2f}s)")
+
+
+def get_camera():
+  global camera
+  with camera_lock:
+    if camera is None or not camera.isOpened():
+      cam = cv2.VideoCapture(camera_index)
+      cam.set(cv2.CAP_PROP_FRAME_WIDTH, camera_width)
+      cam.set(cv2.CAP_PROP_FRAME_HEIGHT, camera_height)
+      cam.set(cv2.CAP_PROP_FPS, camera_fps)
+      camera = cam
+  return camera
+
+
+@app.route("/api/camera", methods=["POST"])
+def api_camera():
+  data = request.get_json(silent=True) or {}
+  index = int(data.get("index", camera_index))
+  width = int(data.get("width", camera_width))
+  height = int(data.get("height", camera_height))
+  fps = int(data.get("fps", camera_fps))
+
+  width = max(160, min(width, 1920))
+  height = max(120, min(height, 1080))
+  fps = max(1, min(fps, 60))
+
+  global camera_index, camera_width, camera_height, camera_fps, camera
+  camera_index = index
+  camera_width = width
+  camera_height = height
+  camera_fps = fps
+
+  with camera_lock:
+    if camera is not None:
+      camera.release()
+      camera = None
+
+  return jsonify(status=f"Camera set (index {index}, {width}x{height}@{fps})")
+
+
+def mjpeg_stream():
+  while True:
+    cam = get_camera()
+    ok, frame = cam.read()
+    if not ok:
+      time.sleep(0.05)
+      continue
+    ok, buf = cv2.imencode(".jpg", frame)
+    if not ok:
+      continue
+    jpg = buf.tobytes()
+    yield (
+      b"--frame\r\n"
+      b"Content-Type: image/jpeg\r\n"
+      b"Content-Length: " + str(len(jpg)).encode("ascii") + b"\r\n\r\n" +
+      jpg + b"\r\n"
+    )
+
+
+@app.route("/stream.mjpg")
+def stream_mjpg():
+  return app.response_class(mjpeg_stream(), mimetype="multipart/x-mixed-replace; boundary=frame")
+
+
 def main():
   parser = argparse.ArgumentParser(description="CAN web UI controller")
   parser.add_argument("--interface", default="socketcan", help="python-can interface (e.g. socketcan, pcan)")
   parser.add_argument("--channel", default="can0", help="CAN channel (e.g. can0, PCAN_USBBUS1)")
   parser.add_argument("--bitrate", type=int, default=500000, help="CAN bitrate")
+  parser.add_argument("--camera-index", type=int, default=0, help="OpenCV camera index")
+  parser.add_argument("--camera-width", type=int, default=640, help="Camera width")
+  parser.add_argument("--camera-height", type=int, default=480, help="Camera height")
+  parser.add_argument("--camera-fps", type=int, default=15, help="Camera FPS")
   parser.add_argument("--host", default="0.0.0.0", help="Host to bind")
   parser.add_argument("--port", type=int, default=8000, help="Port to bind")
   args = parser.parse_args()
 
   global bus
+  global camera_index, camera_width, camera_height, camera_fps
   bus = can.Bus(interface=args.interface, channel=args.channel, bitrate=args.bitrate)
+  camera_index = args.camera_index
+  camera_width = args.camera_width
+  camera_height = args.camera_height
+  camera_fps = args.camera_fps
   app.run(host=args.host, port=args.port, threaded=True)
 
 
