@@ -322,6 +322,7 @@ def api_fire():
 
 @app.route("/api/fire-config", methods=["POST"])
 def api_fire_config():
+  global SERVO_FIRE_FORWARD, SERVO_FIRE_RETURN, SERVO_FIRE_DELAY_SEC
   data = request.get_json(silent=True) or {}
   forward = int(data.get("forward", SERVO_FIRE_FORWARD))
   back = int(data.get("back", SERVO_FIRE_RETURN))
@@ -330,8 +331,6 @@ def api_fire_config():
   forward = clamp(forward, SERVO_MIN, SERVO_MAX)
   back = clamp(back, SERVO_MIN, SERVO_MAX)
   delay = max(0.0, min(delay, 5.0))
-
-  global SERVO_FIRE_FORWARD, SERVO_FIRE_RETURN, SERVO_FIRE_DELAY_SEC
   SERVO_FIRE_FORWARD = forward
   SERVO_FIRE_RETURN = back
   SERVO_FIRE_DELAY_SEC = delay
