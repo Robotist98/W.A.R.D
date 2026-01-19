@@ -17,8 +17,13 @@ constexpr uint8_t kCmdSetPower = 0x10;
 constexpr uint8_t kCmdMoveX = 0x11;
 constexpr uint8_t kCmdMoveY = 0x12;
 constexpr uint8_t kCmdSetServo = 0x13;
+constexpr uint8_t kCmdSetSpeed = 0x14;
 constexpr uint8_t kServoMinAngle = 0x5A;  // 90 degrees
 constexpr uint8_t kServoMaxAngle = 0x91;  // 145 degrees
+
+int16_t xSpeed = 0;
+int16_t ySpeed = 0;
+bool speedMode = false;
 
 bool readInt16(size_t offset, int16_t &value) {
   uint16_t raw = 0;
@@ -67,8 +72,15 @@ void setup() {
 
 void loop() 
 {
-  stepperX.run();
-  stepperY.run();
+  if (speedMode) {
+    stepperX.setSpeed(static_cast<float>(xSpeed));
+    stepperY.setSpeed(static_cast<float>(ySpeed));
+    stepperX.runSpeed();
+    stepperY.runSpeed();
+  } else {
+    stepperX.run();
+    stepperY.run();
+  }
 
   if (telemetry.receive()) {
     const uint32_t cmd = telemetry.getLastReceivedId();
@@ -78,6 +90,9 @@ void loop()
         stepperY.stop();
         stepperX.moveTo(stepperX.currentPosition());
         stepperY.moveTo(stepperY.currentPosition());
+        xSpeed = 0;
+        ySpeed = 0;
+        speedMode = true;
         digitalWrite(MAIN_POWER_PIN, LOW);
         break;
       }
@@ -93,6 +108,7 @@ void loop()
         }
         stepperX.move(delta);
         stepperY.move(delta);
+        speedMode = false;
         break;
       }
       case kCmdSetPower: {
@@ -106,6 +122,7 @@ void loop()
         int16_t delta = 0;
         if (readInt16(0, delta)) {
           stepperX.move(delta);
+          speedMode = false;
         }
         break;
       }
@@ -113,6 +130,17 @@ void loop()
         int16_t delta = 0;
         if (readInt16(0, delta)) {
           stepperY.move(delta);
+          speedMode = false;
+        }
+        break;
+      }
+      case kCmdSetSpeed: {
+        int16_t newX = 0;
+        int16_t newY = 0;
+        if (readInt16(0, newX) && readInt16(2, newY)) {
+          xSpeed = newX;
+          ySpeed = newY;
+          speedMode = true;
         }
         break;
       }
