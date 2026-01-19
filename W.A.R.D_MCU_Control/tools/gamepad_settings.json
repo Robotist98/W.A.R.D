@@ -1,0 +1,19 @@
+{
+  "accelX": 600,
+  "accelY": 250,
+  "cameraFps": 15,
+  "cameraHeight": 480,
+  "cameraIndex": 4,
+  "cameraWidth": 640,
+  "deadzone": 0.1,
+  "enableSend": true,
+  "fireAxis": 5,
+  "fireButton": 0,
+  "fireMode": "button",
+  "fireThreshold": 0.6,
+  "invertX": true,
+  "invertY": true,
+  "maxSpeedX": 1000,
+  "maxSpeedY": 250,
+  "swapAxes": false
+}

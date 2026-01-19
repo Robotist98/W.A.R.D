@@ -1,16 +1,20 @@
 import argparse
+import json
+import os
 import struct
 import threading
+import time
 
 import can
-from flask import Flask, jsonify, render_template_string, request
+import cv2
+from flask import Flask, jsonify, redirect, render_template_string, request
 
-APP_HTML = """<!doctype html>
+DEV_HTML = """<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>W.A.R.D Gamepad Control</title>
+    <title>W.A.R.D Developer Control</title>
     <style>
       :root {
         color-scheme: light;
@@ -61,6 +65,11 @@ APP_HTML = """<!doctype html>
       .subtitle {
         margin: 6px 0 0 0;
         color: var(--muted);
+      }
+      a {
+        color: var(--text);
+        text-decoration: none;
+        font-weight: 600;
       }
       .grid {
         display: grid;
@@ -171,39 +180,42 @@ APP_HTML = """<!doctype html>
     <div class="panel">
       <header>
         <div>
-          <h1>W.A.R.D Gamepad Control</h1>
+          <h1>W.A.R.D Developer Control</h1>
           <p class="subtitle">Left stick drives turret motion. Data streams as CAN speed commands.</p>
         </div>
-        <div class="pill" id="padStatus">Gamepad: Not connected</div>
+        <div>
+          <div class="pill" id="padStatus">Gamepad: Not connected</div>
+          <div class="status"><a href="/control">Back to Control</a></div>
+        </div>
       </header>
       <div class="grid">
         <div class="card">
           <h2>Speed Mapping</h2>
           <label for="maxSpeedX">Max speed X (steps/sec)</label>
-          <input id="maxSpeedX" type="number" value="600" min="0" max="2000" />
+          <input id="maxSpeedX" type="number" value="{{ settings.maxSpeedX }}" min="0" max="2000" />
           <label for="maxSpeedY">Max speed Y (steps/sec)</label>
-          <input id="maxSpeedY" type="number" value="500" min="0" max="2000" />
+          <input id="maxSpeedY" type="number" value="{{ settings.maxSpeedY }}" min="0" max="2000" />
           <label for="accelX">Acceleration X (steps/sec^2)</label>
-          <input id="accelX" type="number" value="300" min="0" max="5000" />
+          <input id="accelX" type="number" value="{{ settings.accelX }}" min="0" max="5000" />
           <label for="accelY">Acceleration Y (steps/sec^2)</label>
-          <input id="accelY" type="number" value="250" min="0" max="5000" />
+          <input id="accelY" type="number" value="{{ settings.accelY }}" min="0" max="5000" />
           <label for="deadzone">Deadzone (0-0.4)</label>
-          <input id="deadzone" type="number" value="0.08" min="0" max="0.4" step="0.01" />
+          <input id="deadzone" type="number" value="{{ settings.deadzone }}" min="0" max="0.4" step="0.01" />
           <div class="toggle">
             <label for="invertX">Invert X</label>
-            <input id="invertX" type="checkbox" />
+            <input id="invertX" type="checkbox" {% if settings.invertX %}checked{% endif %} />
           </div>
           <div class="toggle">
             <label for="invertY">Invert Y</label>
-            <input id="invertY" type="checkbox" checked />
+            <input id="invertY" type="checkbox" {% if settings.invertY %}checked{% endif %} />
           </div>
           <div class="toggle">
             <label for="swapAxes">Swap sticks</label>
-            <input id="swapAxes" type="checkbox" />
+            <input id="swapAxes" type="checkbox" {% if settings.swapAxes %}checked{% endif %} />
           </div>
           <div class="toggle">
             <label for="enableSend">Send CAN updates</label>
-            <input id="enableSend" type="checkbox" checked />
+            <input id="enableSend" type="checkbox" {% if settings.enableSend %}checked{% endif %} />
           </div>
           <button class="secondary" onclick="sendStop()">Send Stop</button>
           <button onclick="sendAccel()">Send Accel</button>
@@ -219,12 +231,41 @@ APP_HTML = """<!doctype html>
           <div class="status">Speed Y: <span id="speedY">0</span></div>
         </div>
         <div class="card">
+          <h2>Fire Control</h2>
+          <label for="fireMode">Input mode</label>
+          <select id="fireMode">
+            <option value="button" {% if settings.fireMode == 'button' %}selected{% endif %}>Button</option>
+            <option value="axis" {% if settings.fireMode == 'axis' %}selected{% endif %}>Axis</option>
+          </select>
+          <label for="fireButton">Button index</label>
+          <input id="fireButton" type="number" value="{{ settings.fireButton }}" min="0" max="16" />
+          <label for="fireAxis">Axis index</label>
+          <input id="fireAxis" type="number" value="{{ settings.fireAxis }}" min="0" max="8" />
+          <label for="fireThreshold">Axis threshold (0-1)</label>
+          <input id="fireThreshold" type="number" value="{{ settings.fireThreshold }}" min="0" max="1" step="0.05" />
+          <button onclick="sendFire()">Fire Now</button>
+          <div class="status" id="fireStatus">Idle</div>
+        </div>
+        <div class="card">
           <h2>Power</h2>
           <div class="row">
             <button onclick="setPower(true)">Power On</button>
             <button onclick="setPower(false)">Power Off</button>
           </div>
           <div class="status" id="powerStatus">Idle</div>
+        </div>
+        <div class="card">
+          <h2>Camera Settings</h2>
+          <label for="camIndex">Index</label>
+          <input id="camIndex" type="number" min="0" max="10" value="{{ settings.cameraIndex }}" />
+          <label for="camWidth">Width</label>
+          <input id="camWidth" type="number" min="160" max="1920" value="{{ settings.cameraWidth }}" />
+          <label for="camHeight">Height</label>
+          <input id="camHeight" type="number" min="120" max="1080" value="{{ settings.cameraHeight }}" />
+          <label for="camFps">FPS</label>
+          <input id="camFps" type="number" min="1" max="60" value="{{ settings.cameraFps }}" />
+          <button onclick="setCamera()">Apply Camera Settings</button>
+          <div class="status" id="cameraStatus">Idle</div>
         </div>
         <div class="card">
           <h2>Notes</h2>
@@ -242,6 +283,8 @@ APP_HTML = """<!doctype html>
         gamepadIndex: null,
         lastSend: 0,
         lastPayload: null,
+        lastFirePressed: false,
+        lastFireTime: 0,
       };
 
       function deadzone(value, dz) {
@@ -282,8 +325,48 @@ APP_HTML = """<!doctype html>
         document.getElementById("sendStatus").textContent = data.status;
       }
 
+      async function sendFire() {
+        const data = await postJson("/api/fire", {});
+        document.getElementById("fireStatus").textContent = data.status;
+      }
+
       async function sendStop() {
         await sendSpeed(0, 0);
+      }
+
+      async function saveSettings(payload) {
+        await postJson("/api/settings", payload);
+      }
+
+      async function setCamera() {
+        const index = Number(document.getElementById("camIndex").value);
+        const width = Number(document.getElementById("camWidth").value);
+        const height = Number(document.getElementById("camHeight").value);
+        const fps = Number(document.getElementById("camFps").value);
+        const data = await postJson("/api/camera", { index, width, height, fps });
+        document.getElementById("cameraStatus").textContent = data.status;
+      }
+
+      function collectDevSettings() {
+        return {
+          maxSpeedX: Number(document.getElementById("maxSpeedX").value) || 0,
+          maxSpeedY: Number(document.getElementById("maxSpeedY").value) || 0,
+          accelX: Number(document.getElementById("accelX").value) || 0,
+          accelY: Number(document.getElementById("accelY").value) || 0,
+          deadzone: Number(document.getElementById("deadzone").value) || 0,
+          invertX: document.getElementById("invertX").checked,
+          invertY: document.getElementById("invertY").checked,
+          swapAxes: document.getElementById("swapAxes").checked,
+          enableSend: document.getElementById("enableSend").checked,
+          fireMode: document.getElementById("fireMode").value,
+          fireButton: Number(document.getElementById("fireButton").value) || 0,
+          fireAxis: Number(document.getElementById("fireAxis").value) || 0,
+          fireThreshold: Number(document.getElementById("fireThreshold").value) || 0,
+          cameraIndex: Number(document.getElementById("camIndex").value) || 0,
+          cameraWidth: Number(document.getElementById("camWidth").value) || 0,
+          cameraHeight: Number(document.getElementById("camHeight").value) || 0,
+          cameraFps: Number(document.getElementById("camFps").value) || 0,
+        };
       }
 
       function getConfig() {
@@ -342,6 +425,30 @@ APP_HTML = """<!doctype html>
           }
         }
 
+        const fireMode = document.getElementById("fireMode").value;
+        const fireButton = Number(document.getElementById("fireButton").value) || 0;
+        const fireAxis = Number(document.getElementById("fireAxis").value) || 0;
+        const fireThreshold = Number(document.getElementById("fireThreshold").value) || 0;
+        let fired = false;
+        if (fireMode === "axis") {
+          const axisValue = pad.axes[fireAxis] || 0;
+          const pressed = axisValue >= fireThreshold;
+          if (pressed && !state.lastFirePressed) {
+            fired = true;
+          }
+          state.lastFirePressed = pressed;
+        } else {
+          const pressed = Boolean(pad.buttons[fireButton] && pad.buttons[fireButton].pressed);
+          if (pressed && !state.lastFirePressed) {
+            fired = true;
+          }
+          state.lastFirePressed = pressed;
+        }
+        if (fired && now - state.lastFireTime > 300) {
+          state.lastFireTime = now;
+          sendFire().catch(() => {});
+        }
+
         requestAnimationFrame(update);
       }
 
@@ -355,6 +462,312 @@ APP_HTML = """<!doctype html>
         sendStop().catch(() => {});
       });
 
+      document.querySelectorAll(
+        "#maxSpeedX, #maxSpeedY, #accelX, #accelY, #deadzone, #invertX, #invertY, #swapAxes, #enableSend," +
+        "#fireMode, #fireButton, #fireAxis, #fireThreshold, #camIndex, #camWidth, #camHeight, #camFps"
+      ).forEach((el) => {
+        el.addEventListener("change", () => saveSettings(collectDevSettings()).catch(() => {}));
+      });
+
+      update();
+    </script>
+  </body>
+</html>
+"""
+
+CONTROL_HTML = """<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>W.A.R.D Control</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg-top: #f5efe6;
+        --bg-bottom: #d2dde5;
+        --panel: #0c1a1f;
+        --accent: #f05d23;
+        --accent-2: #2a9d8f;
+        --text: #f4f1ea;
+        --muted: #9db1b6;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: "Space Grotesk", "Segoe UI", sans-serif;
+        background: radial-gradient(circle at top, #ffffff, var(--bg-top), var(--bg-bottom));
+        min-height: 100vh;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        padding: 24px;
+        color: var(--text);
+      }
+      .panel {
+        width: min(1100px, 100%);
+        background: linear-gradient(160deg, var(--panel), #0b1418);
+        border-radius: 24px;
+        padding: 24px;
+        box-shadow: 0 30px 80px rgba(0, 0, 0, 0.35);
+        border: 1px solid rgba(255, 255, 255, 0.05);
+      }
+      header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 16px;
+        margin-bottom: 16px;
+      }
+      h1 {
+        margin: 0;
+        font-size: 1.6rem;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+      .stream {
+        width: 100%;
+        border-radius: 16px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: #0a1114;
+      }
+      .toolbar {
+        margin-top: 16px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: center;
+      }
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 12px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.08);
+        font-size: 0.8rem;
+      }
+      button {
+        border-radius: 10px;
+        border: 1px solid transparent;
+        padding: 10px 14px;
+        font-size: 0.95rem;
+        background: var(--accent);
+        color: #160b08;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      button.secondary {
+        background: var(--accent-2);
+        color: #081413;
+      }
+      label {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--muted);
+        font-size: 0.85rem;
+      }
+      .status {
+        margin-top: 10px;
+        color: var(--muted);
+        font-size: 0.85rem;
+      }
+      a {
+        color: var(--text);
+        text-decoration: none;
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="panel">
+      <header>
+        <h1>W.A.R.D Control</h1>
+        <div class="pill" id="padStatus">Gamepad: Not connected</div>
+      </header>
+      <img class="stream" src="/stream.mjpg" alt="Camera stream" />
+      <div class="toolbar">
+        <label>
+          <span>Enable gamepad</span>
+          <input id="enableGamepad" type="checkbox" {% if settings.enableSend %}checked{% endif %} />
+        </label>
+        <button onclick="setPower(true)">Power On</button>
+        <button onclick="setPower(false)">Power Off</button>
+        <button class="secondary" onclick="sendFire()">Fire</button>
+        <button class="secondary" onclick="sendStop()">Stop</button>
+        <a href="/dev">Developer Controls</a>
+      </div>
+      <div class="status" id="controlStatus">Idle</div>
+    </div>
+    <script>
+      const config = {
+        maxSpeedX: {{ settings.maxSpeedX }},
+        maxSpeedY: {{ settings.maxSpeedY }},
+        deadzone: {{ settings.deadzone }},
+        invertX: {{ "true" if settings.invertX else "false" }},
+        invertY: {{ "true" if settings.invertY else "false" }},
+        swapAxes: {{ "true" if settings.swapAxes else "false" }},
+        enableSend: {{ "true" if settings.enableSend else "false" }},
+        fireMode: "{{ settings.fireMode }}",
+        fireButton: {{ settings.fireButton }},
+        fireAxis: {{ settings.fireAxis }},
+        fireThreshold: {{ settings.fireThreshold }},
+      };
+
+      const state = {
+        gamepadIndex: null,
+        lastSend: 0,
+        lastPayload: null,
+        lastFirePressed: false,
+        lastFireTime: 0,
+      };
+
+      async function postJson(url, payload) {
+        const res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        return res.json();
+      }
+
+      async function setPower(stateValue) {
+        const data = await postJson("/api/power", { state: stateValue });
+        document.getElementById("controlStatus").textContent = data.status;
+      }
+
+      async function sendSpeed(xSpeed, ySpeed) {
+        const data = await postJson("/api/speed", { x_speed: xSpeed, y_speed: ySpeed });
+        document.getElementById("controlStatus").textContent = data.status;
+      }
+
+      async function sendStop() {
+        await sendSpeed(0, 0);
+      }
+
+      async function sendFire() {
+        const data = await postJson("/api/fire", {});
+        document.getElementById("controlStatus").textContent = data.status;
+      }
+
+      async function saveSettings(payload) {
+        await postJson("/api/settings", payload);
+      }
+
+      function deadzone(value, dz) {
+        const abs = Math.abs(value);
+        if (abs < dz) return 0;
+        const scaled = (abs - dz) / (1 - dz);
+        return Math.sign(value) * scaled;
+      }
+
+      function applySettings(data) {
+        if (!data) return;
+        if (typeof data.maxSpeedX === "number") config.maxSpeedX = data.maxSpeedX;
+        if (typeof data.maxSpeedY === "number") config.maxSpeedY = data.maxSpeedY;
+        if (typeof data.deadzone === "number") config.deadzone = data.deadzone;
+        if (typeof data.invertX === "boolean") config.invertX = data.invertX;
+        if (typeof data.invertY === "boolean") config.invertY = data.invertY;
+        if (typeof data.swapAxes === "boolean") config.swapAxes = data.swapAxes;
+        if (typeof data.enableSend === "boolean") config.enableSend = data.enableSend;
+        if (typeof data.fireMode === "string") config.fireMode = data.fireMode;
+        if (typeof data.fireButton === "number") config.fireButton = data.fireButton;
+        if (typeof data.fireAxis === "number") config.fireAxis = data.fireAxis;
+        if (typeof data.fireThreshold === "number") config.fireThreshold = data.fireThreshold;
+        const enable = document.getElementById("enableGamepad");
+        enable.checked = Boolean(config.enableSend);
+      }
+
+      async function refreshSettings() {
+        try {
+          const res = await fetch("/api/settings");
+          const data = await res.json();
+          applySettings(data);
+        } catch (err) {}
+      }
+
+      function update() {
+        const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+        const pad = state.gamepadIndex !== null ? pads[state.gamepadIndex] : null;
+        const status = document.getElementById("padStatus");
+        if (!pad) {
+          status.textContent = "Gamepad: Not connected";
+          requestAnimationFrame(update);
+          return;
+        }
+
+        status.textContent = `Gamepad: ${pad.id}`;
+        let axisX = pad.axes[0] || 0;
+        let axisY = pad.axes[3] || 0;
+        if (config.swapAxes) {
+          const temp = axisX;
+          axisX = axisY;
+          axisY = temp;
+        }
+        axisX = deadzone(axisX, config.deadzone);
+        axisY = deadzone(axisY, config.deadzone);
+        if (config.invertX) axisX *= -1;
+        if (config.invertY) axisY *= -1;
+
+        const xSpeed = Math.round(axisX * config.maxSpeedX);
+        const ySpeed = Math.round(axisY * config.maxSpeedY);
+
+        const now = performance.now();
+        const payload = `${xSpeed},${ySpeed}`;
+        if (config.enableSend && (payload !== state.lastPayload || now - state.lastSend > 1000)) {
+          if (now - state.lastSend > 50) {
+            state.lastSend = now;
+            state.lastPayload = payload;
+            sendSpeed(xSpeed, ySpeed).catch(() => {});
+          }
+        }
+
+        let fired = false;
+        if (config.fireMode === "axis") {
+          const axisValue = pad.axes[config.fireAxis] || 0;
+          const pressed = axisValue >= config.fireThreshold;
+          if (pressed && !state.lastFirePressed) {
+            fired = true;
+          }
+          state.lastFirePressed = pressed;
+        } else {
+          const pressed = Boolean(pad.buttons[config.fireButton] && pad.buttons[config.fireButton].pressed);
+          if (pressed && !state.lastFirePressed) {
+            fired = true;
+          }
+          state.lastFirePressed = pressed;
+        }
+        if (fired && now - state.lastFireTime > 300) {
+          state.lastFireTime = now;
+          sendFire().catch(() => {});
+        }
+
+        requestAnimationFrame(update);
+      }
+
+      window.addEventListener("gamepadconnected", (event) => {
+        state.gamepadIndex = event.gamepad.index;
+        document.getElementById("padStatus").textContent = `Gamepad: ${event.gamepad.id}`;
+      });
+
+      window.addEventListener("gamepaddisconnected", () => {
+        state.gamepadIndex = null;
+        sendStop().catch(() => {});
+      });
+
+      document.getElementById("enableGamepad").addEventListener("change", (event) => {
+        config.enableSend = event.target.checked;
+        saveSettings({ enableSend: config.enableSend }).catch(() => {});
+      });
+
+      window.addEventListener("pageshow", () => {
+        refreshSettings();
+      });
+
+      refreshSettings();
       update();
     </script>
   </body>
@@ -364,10 +777,82 @@ APP_HTML = """<!doctype html>
 CAN_CMD_SET_POWER = 0x10
 CAN_CMD_SET_SPEED = 0x14
 CAN_CMD_SET_ACCEL = 0x15
+CAN_CMD_SET_SERVO = 0x13
+
+SERVO_MIN = 90
+SERVO_MAX = 145
+SERVO_FIRE_FORWARD = SERVO_MAX
+SERVO_FIRE_RETURN = SERVO_MIN
+SERVO_FIRE_DELAY_SEC = 0.3
 
 app = Flask(__name__)
 bus = None
 bus_lock = threading.Lock()
+camera_lock = threading.Lock()
+camera = None
+camera_index = 0
+camera_width = 640
+camera_height = 480
+camera_fps = 15
+settings_lock = threading.Lock()
+SETTINGS_PATH = os.path.join(os.path.dirname(__file__), "gamepad_settings.json")
+
+DEFAULT_SETTINGS = {
+  "maxSpeedX": 600,
+  "maxSpeedY": 500,
+  "accelX": 300,
+  "accelY": 250,
+  "deadzone": 0.08,
+  "invertX": False,
+  "invertY": True,
+  "swapAxes": False,
+  "enableSend": True,
+  "fireMode": "button",
+  "fireButton": 0,
+  "fireAxis": 5,
+  "fireThreshold": 0.6,
+  "cameraIndex": 0,
+  "cameraWidth": 640,
+  "cameraHeight": 480,
+  "cameraFps": 15,
+}
+
+def normalize_settings(values):
+  mapped = dict(values)
+  if "maxSpeedX" not in values and "basicSpeed" in values:
+    mapped["maxSpeedX"] = values.get("basicSpeed", mapped.get("maxSpeedX", 0))
+  if "deadzone" not in values and "basicDeadzone" in values:
+    mapped["deadzone"] = values.get("basicDeadzone", mapped.get("deadzone", 0))
+  if "invertY" not in values and "basicInvertY" in values:
+    mapped["invertY"] = values.get("basicInvertY", mapped.get("invertY", False))
+  if "enableSend" not in values and "basicEnableGamepad" in values:
+    mapped["enableSend"] = values.get("basicEnableGamepad", mapped.get("enableSend", True))
+  return mapped
+
+
+def load_settings():
+  settings = dict(DEFAULT_SETTINGS)
+  if os.path.exists(SETTINGS_PATH):
+    try:
+      with open(SETTINGS_PATH, "r", encoding="utf-8") as handle:
+        stored = json.load(handle)
+      if isinstance(stored, dict):
+        settings.update(normalize_settings(stored))
+    except (OSError, json.JSONDecodeError):
+      pass
+  return normalize_settings(settings)
+
+
+def save_settings(settings):
+  try:
+    cleaned = {key: value for key, value in settings.items() if not key.startswith("basic")}
+    with open(SETTINGS_PATH, "w", encoding="utf-8") as handle:
+      json.dump(cleaned, handle, indent=2, sort_keys=True)
+  except OSError:
+    pass
+
+
+settings = load_settings()
 
 
 def clamp(value, min_value, max_value):
@@ -386,7 +871,40 @@ def send_can(cmd_id, payload):
 
 @app.route("/")
 def index():
-  return render_template_string(APP_HTML)
+  return redirect("/control")
+
+@app.route("/control")
+def control():
+  with settings_lock:
+    current = dict(settings)
+  return render_template_string(CONTROL_HTML, settings=current)
+
+
+@app.route("/dev")
+def dev():
+  with settings_lock:
+    current = dict(settings)
+  return render_template_string(DEV_HTML, settings=current)
+
+
+@app.route("/api/settings", methods=["GET", "POST"])
+def api_settings():
+  global settings
+  if request.method == "GET":
+    with settings_lock:
+      settings = load_settings()
+      current = dict(settings)
+    return jsonify(current)
+
+  data = request.get_json(silent=True) or {}
+  if not isinstance(data, dict):
+    return jsonify(status="Invalid settings payload"), 400
+  with settings_lock:
+    settings.update(normalize_settings(data))
+    settings.update(normalize_settings(settings))
+    save_settings(settings)
+    current = dict(settings)
+  return jsonify(current)
 
 
 @app.route("/api/power", methods=["POST"])
@@ -418,7 +936,90 @@ def api_accel():
   y_accel = clamp(y_accel, 0, 5000)
   payload = struct.pack(">hh", x_accel, y_accel)
   send_can(CAN_CMD_SET_ACCEL, payload)
+  with settings_lock:
+    settings["accelX"] = x_accel
+    settings["accelY"] = y_accel
+    save_settings(settings)
   return jsonify(status=f"Accel X {x_accel}, Y {y_accel} sent")
+
+
+def fire_sequence():
+  send_can(CAN_CMD_SET_SERVO, bytes([SERVO_FIRE_FORWARD]))
+  time.sleep(SERVO_FIRE_DELAY_SEC)
+  send_can(CAN_CMD_SET_SERVO, bytes([SERVO_FIRE_RETURN]))
+
+
+@app.route("/api/fire", methods=["POST"])
+def api_fire():
+  threading.Thread(target=fire_sequence, daemon=True).start()
+  return jsonify(status="Fire sequence sent")
+
+
+def get_camera():
+  global camera
+  with camera_lock:
+    if camera is None or not camera.isOpened():
+      cam = cv2.VideoCapture(camera_index)
+      cam.set(cv2.CAP_PROP_FRAME_WIDTH, camera_width)
+      cam.set(cv2.CAP_PROP_FRAME_HEIGHT, camera_height)
+      cam.set(cv2.CAP_PROP_FPS, camera_fps)
+      camera = cam
+  return camera
+
+
+@app.route("/api/camera", methods=["POST"])
+def api_camera():
+  global camera_index, camera_width, camera_height, camera_fps, camera
+  data = request.get_json(silent=True) or {}
+  index = int(data.get("index", camera_index))
+  width = int(data.get("width", camera_width))
+  height = int(data.get("height", camera_height))
+  fps = int(data.get("fps", camera_fps))
+
+  width = max(160, min(width, 1920))
+  height = max(120, min(height, 1080))
+  fps = max(1, min(fps, 60))
+  camera_index = index
+  camera_width = width
+  camera_height = height
+  camera_fps = fps
+  with settings_lock:
+    settings["cameraIndex"] = index
+    settings["cameraWidth"] = width
+    settings["cameraHeight"] = height
+    settings["cameraFps"] = fps
+    save_settings(settings)
+
+  with camera_lock:
+    if camera is not None:
+      camera.release()
+      camera = None
+
+  return jsonify(status=f"Camera set (index {index}, {width}x{height}@{fps})")
+
+
+def mjpeg_stream():
+  while True:
+    cam = get_camera()
+    ok, frame = cam.read()
+    if not ok:
+      time.sleep(0.05)
+      continue
+    ok, buf = cv2.imencode(".jpg", frame)
+    if not ok:
+      continue
+    jpg = buf.tobytes()
+    yield (
+      b"--frame\r\n"
+      b"Content-Type: image/jpeg\r\n"
+      b"Content-Length: " + str(len(jpg)).encode("ascii") + b"\r\n\r\n" +
+      jpg + b"\r\n"
+    )
+
+
+@app.route("/stream.mjpg")
+def stream_mjpg():
+  return app.response_class(mjpeg_stream(), mimetype="multipart/x-mixed-replace; boundary=frame")
 
 
 def main():
@@ -426,12 +1027,22 @@ def main():
   parser.add_argument("--interface", default="socketcan", help="python-can interface (e.g. socketcan, pcan)")
   parser.add_argument("--channel", default="can0", help="CAN channel (e.g. can0, PCAN_USBBUS1)")
   parser.add_argument("--bitrate", type=int, default=500000, help="CAN bitrate")
+  parser.add_argument("--camera-index", type=int, default=0, help="OpenCV camera index")
+  parser.add_argument("--camera-width", type=int, default=640, help="Camera width")
+  parser.add_argument("--camera-height", type=int, default=480, help="Camera height")
+  parser.add_argument("--camera-fps", type=int, default=15, help="Camera FPS")
   parser.add_argument("--host", default="0.0.0.0", help="Host to bind")
   parser.add_argument("--port", type=int, default=8001, help="Port to bind")
   args = parser.parse_args()
 
   global bus
   bus = can.Bus(interface=args.interface, channel=args.channel, bitrate=args.bitrate)
+  global camera_index, camera_width, camera_height, camera_fps
+  with settings_lock:
+    camera_index = settings.get("cameraIndex", args.camera_index)
+    camera_width = settings.get("cameraWidth", args.camera_width)
+    camera_height = settings.get("cameraHeight", args.camera_height)
+    camera_fps = settings.get("cameraFps", args.camera_fps)
   app.run(host=args.host, port=args.port, threaded=True)
 
 
