@@ -179,8 +179,14 @@ APP_HTML = """<!doctype html>
       <div class="grid">
         <div class="card">
           <h2>Speed Mapping</h2>
-          <label for="maxSpeed">Max speed (steps/sec)</label>
-          <input id="maxSpeed" type="number" value="600" min="0" max="2000" />
+          <label for="maxSpeedX">Max speed X (steps/sec)</label>
+          <input id="maxSpeedX" type="number" value="600" min="0" max="2000" />
+          <label for="maxSpeedY">Max speed Y (steps/sec)</label>
+          <input id="maxSpeedY" type="number" value="500" min="0" max="2000" />
+          <label for="accelX">Acceleration X (steps/sec^2)</label>
+          <input id="accelX" type="number" value="300" min="0" max="5000" />
+          <label for="accelY">Acceleration Y (steps/sec^2)</label>
+          <input id="accelY" type="number" value="250" min="0" max="5000" />
           <label for="deadzone">Deadzone (0-0.4)</label>
           <input id="deadzone" type="number" value="0.08" min="0" max="0.4" step="0.01" />
           <div class="toggle">
@@ -192,7 +198,7 @@ APP_HTML = """<!doctype html>
             <input id="invertY" type="checkbox" checked />
           </div>
           <div class="toggle">
-            <label for="swapAxes">Swap axes</label>
+            <label for="swapAxes">Swap sticks</label>
             <input id="swapAxes" type="checkbox" />
           </div>
           <div class="toggle">
@@ -200,6 +206,7 @@ APP_HTML = """<!doctype html>
             <input id="enableSend" type="checkbox" checked />
           </div>
           <button class="secondary" onclick="sendStop()">Send Stop</button>
+          <button onclick="sendAccel()">Send Accel</button>
           <div class="status" id="sendStatus">Idle</div>
         </div>
         <div class="card">
@@ -221,7 +228,7 @@ APP_HTML = """<!doctype html>
         </div>
         <div class="card">
           <h2>Notes</h2>
-          <p class="status">Connect a gamepad and move the left stick to drive motion. Speeds are clamped to 16-bit signed values.</p>
+          <p class="status">Left stick X controls X. Right stick Y controls Y. Speeds are clamped to 16-bit signed values.</p>
           <p class="status">If you lose connection, press Send Stop or disable updates.</p>
         </div>
       </div>
@@ -268,13 +275,21 @@ APP_HTML = """<!doctype html>
         document.getElementById("sendStatus").textContent = data.status;
       }
 
+      async function sendAccel() {
+        const accelX = Number(document.getElementById("accelX").value) || 0;
+        const accelY = Number(document.getElementById("accelY").value) || 0;
+        const data = await postJson("/api/accel", { x_accel: accelX, y_accel: accelY });
+        document.getElementById("sendStatus").textContent = data.status;
+      }
+
       async function sendStop() {
         await sendSpeed(0, 0);
       }
 
       function getConfig() {
         return {
-          maxSpeed: Number(document.getElementById("maxSpeed").value) || 0,
+          maxSpeedX: Number(document.getElementById("maxSpeedX").value) || 0,
+          maxSpeedY: Number(document.getElementById("maxSpeedY").value) || 0,
           deadzone: Number(document.getElementById("deadzone").value) || 0,
           invertX: document.getElementById("invertX").checked,
           invertY: document.getElementById("invertY").checked,
@@ -296,7 +311,7 @@ APP_HTML = """<!doctype html>
         status.textContent = `Gamepad: ${pad.id}`;
         const config = getConfig();
         let axisX = pad.axes[0] || 0;
-        let axisY = pad.axes[1] || 0;
+        let axisY = pad.axes[3] || 0;
         if (config.swapAxes) {
           const temp = axisX;
           axisX = axisY;
@@ -307,8 +322,8 @@ APP_HTML = """<!doctype html>
         if (config.invertX) axisX *= -1;
         if (config.invertY) axisY *= -1;
 
-        const xSpeed = Math.round(axisX * config.maxSpeed);
-        const ySpeed = Math.round(axisY * config.maxSpeed);
+        const xSpeed = Math.round(axisX * config.maxSpeedX);
+        const ySpeed = Math.round(axisY * config.maxSpeedY);
 
         document.getElementById("axisX").textContent = axisX.toFixed(2);
         document.getElementById("axisY").textContent = axisY.toFixed(2);
@@ -348,6 +363,7 @@ APP_HTML = """<!doctype html>
 
 CAN_CMD_SET_POWER = 0x10
 CAN_CMD_SET_SPEED = 0x14
+CAN_CMD_SET_ACCEL = 0x15
 
 app = Flask(__name__)
 bus = None
@@ -391,6 +407,18 @@ def api_speed():
   payload = struct.pack(">hh", x_speed, y_speed)
   send_can(CAN_CMD_SET_SPEED, payload)
   return jsonify(status=f"Speed X {x_speed}, Y {y_speed} sent")
+
+
+@app.route("/api/accel", methods=["POST"])
+def api_accel():
+  data = request.get_json(silent=True) or {}
+  x_accel = int(data.get("x_accel", 0))
+  y_accel = int(data.get("y_accel", 0))
+  x_accel = clamp(x_accel, 0, 5000)
+  y_accel = clamp(y_accel, 0, 5000)
+  payload = struct.pack(">hh", x_accel, y_accel)
+  send_can(CAN_CMD_SET_ACCEL, payload)
+  return jsonify(status=f"Accel X {x_accel}, Y {y_accel} sent")
 
 
 def main():

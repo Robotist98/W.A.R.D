@@ -18,12 +18,15 @@ constexpr uint8_t kCmdMoveX = 0x11;
 constexpr uint8_t kCmdMoveY = 0x12;
 constexpr uint8_t kCmdSetServo = 0x13;
 constexpr uint8_t kCmdSetSpeed = 0x14;
+constexpr uint8_t kCmdSetAccel = 0x15;
 constexpr uint8_t kServoMinAngle = 0x5A;  // 90 degrees
 constexpr uint8_t kServoMaxAngle = 0x91;  // 145 degrees
 
 int16_t xSpeed = 0;
 int16_t ySpeed = 0;
 bool speedMode = false;
+int16_t xAccel = 300;
+int16_t yAccel = 250;
 
 bool readInt16(size_t offset, int16_t &value) {
   uint16_t raw = 0;
@@ -53,11 +56,11 @@ void setup() {
   delay(100);
 
   stepperX.setMaxSpeed(1000);     // Max steps/sec
-  stepperX.setAcceleration(300);  // Smoother movement
+  stepperX.setAcceleration(xAccel);  // Smoother movement
 
   // Configure Y-axis motor
   stepperY.setMaxSpeed(800);      // Less speed if lower microstepping
-  stepperY.setAcceleration(250);
+  stepperY.setAcceleration(yAccel);
 
   triggerServo.attach(SERVO_TRIGGER_PIN);
   triggerServo.write(100);
@@ -109,6 +112,23 @@ void loop()
         stepperX.move(delta);
         stepperY.move(delta);
         speedMode = false;
+        break;
+      }
+      case kCmdSetAccel: {
+        int16_t newX = 0;
+        int16_t newY = 0;
+        if (readInt16(0, newX) && readInt16(2, newY)) {
+          if (newX < 0) {
+            newX = static_cast<int16_t>(-newX);
+          }
+          if (newY < 0) {
+            newY = static_cast<int16_t>(-newY);
+          }
+          xAccel = newX;
+          yAccel = newY;
+          stepperX.setAcceleration(static_cast<float>(xAccel));
+          stepperY.setAcceleration(static_cast<float>(yAccel));
+        }
         break;
       }
       case kCmdSetPower: {
