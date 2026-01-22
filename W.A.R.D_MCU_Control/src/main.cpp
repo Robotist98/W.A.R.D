@@ -3,6 +3,8 @@
 #include "config.h"
 #include "AccelStepper.h"
 #include <Servo.h>
+#include <Wire.h>
+#include <Adafruit_AS5600.h>
 
 Telemetry telemetry(SPI_CAN_CS_PIN, SPI_MISO_PIN, SPI_MOSI_PIN, SPI_SCK_PIN);
 UniversalPacker packer;
@@ -10,8 +12,11 @@ UniversalPacker packer;
 AccelStepper stepperX(AccelStepper::DRIVER, X_AXIS_STEP_PIN, X_AXIS_DIR_PIN);
 AccelStepper stepperY(AccelStepper::DRIVER, Y_AXIS_STEP_PIN, Y_AXIS_DIR_PIN);
 Servo triggerServo;
+Adafruit_AS5600 as5600;
+bool as5600Available = false;
 
 constexpr long kStepDelta = 100;
+constexpr uint32_t kAs5600ReadIntervalMs = 100;
 
 constexpr uint8_t kCmdSetPower = 0x10;
 constexpr uint8_t kCmdMoveX = 0x11;
@@ -27,6 +32,7 @@ int16_t ySpeed = 0;
 bool speedMode = false;
 int16_t xAccel = 300;
 int16_t yAccel = 250;
+uint32_t lastAs5600ReadMs = 0;
 
 bool readInt16(size_t offset, int16_t &value) {
   uint16_t raw = 0;
@@ -44,6 +50,14 @@ void setup() {
   Serial.println("MCP2515 Sender test!");
   pinMode(13, OUTPUT);
   pinMode(MAIN_POWER_PIN, OUTPUT);
+
+  Wire.begin();
+  if (!as5600.begin()) {
+    Serial.println("AS5600 not found.");
+  } else {
+    as5600Available = true;
+    Serial.println("AS5600 ready.");
+  }
 
   if (!telemetry.begin(CAN_BAUDRATE)) 
   {
@@ -75,6 +89,8 @@ void setup() {
 
 void loop() 
 {
+  const uint32_t nowMs = millis();
+
   if (speedMode) {
     stepperX.setSpeed(static_cast<float>(xSpeed));
     stepperY.setSpeed(static_cast<float>(ySpeed));
@@ -83,6 +99,17 @@ void loop()
   } else {
     stepperX.run();
     stepperY.run();
+  }
+
+  if (as5600Available && (nowMs - lastAs5600ReadMs >= kAs5600ReadIntervalMs)) {
+    lastAs5600ReadMs = nowMs;
+    const uint16_t rawAngle = as5600.getAngle();
+    const float degrees = (rawAngle * 360.0f) / 4096.0f;
+    Serial.print("AS5600 angle: ");
+    Serial.print(rawAngle);
+    Serial.print(" (");
+    Serial.print(degrees, 2);
+    Serial.println(" deg)");
   }
 
   if (telemetry.receive()) {
