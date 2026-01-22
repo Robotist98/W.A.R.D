@@ -14,6 +14,7 @@ AccelStepper stepperY(AccelStepper::DRIVER, Y_AXIS_STEP_PIN, Y_AXIS_DIR_PIN);
 Servo triggerServo;
 Adafruit_AS5600 as5600;
 bool as5600Available = false;
+float as5600Offset = 29.0f;
 
 constexpr long kStepDelta = 100;
 constexpr uint32_t kAs5600ReadIntervalMs = 100;
@@ -24,8 +25,11 @@ constexpr uint8_t kCmdMoveY = 0x12;
 constexpr uint8_t kCmdSetServo = 0x13;
 constexpr uint8_t kCmdSetSpeed = 0x14;
 constexpr uint8_t kCmdSetAccel = 0x15;
+constexpr uint8_t kCmdMoveYToZero = 0x16;
 constexpr uint8_t kServoMinAngle = 0x5A;  // 90 degrees
 constexpr uint8_t kServoMaxAngle = 0x91;  // 145 degrees
+constexpr float kXHomeSpeed = 50.0f;
+constexpr float kXHomeToleranceDeg = 1.0f;
 
 int16_t xSpeed = 0;
 int16_t ySpeed = 0;
@@ -33,6 +37,9 @@ bool speedMode = false;
 int16_t xAccel = 300;
 int16_t yAccel = 250;
 uint32_t lastAs5600ReadMs = 0;
+float as5600Angle = 0.0f;
+bool as5600AngleValid = false;
+bool homingYToZero = false;
 
 bool readInt16(size_t offset, int16_t &value) {
   uint16_t raw = 0;
@@ -92,24 +99,49 @@ void loop()
   const uint32_t nowMs = millis();
 
   if (speedMode) {
-    stepperX.setSpeed(static_cast<float>(xSpeed));
+    if (!homingYToZero) {
+      stepperX.setSpeed(static_cast<float>(xSpeed));
+      stepperX.runSpeed();
+    }
     stepperY.setSpeed(static_cast<float>(ySpeed));
-    stepperX.runSpeed();
     stepperY.runSpeed();
   } else {
-    stepperX.run();
+    if (!homingYToZero) {
+      stepperX.run();
+    }
     stepperY.run();
   }
 
   if (as5600Available && (nowMs - lastAs5600ReadMs >= kAs5600ReadIntervalMs)) {
     lastAs5600ReadMs = nowMs;
-    const uint16_t rawAngle = as5600.getAngle();
-    const float degrees = (rawAngle * 360.0f) / 4096.0f;
-    Serial.print("AS5600 angle: ");
-    Serial.print(rawAngle);
-    Serial.print(" (");
-    Serial.print(degrees, 2);
-    Serial.println(" deg)");
+    if (!as5600.isMagnetDetected()) {
+      as5600AngleValid = false;
+      Serial.println("AS5600 magnet not detected");
+    } else {
+      const float rawAngle = (as5600.getRawAngle() * 360.0f) / 4096.0f;
+      float angle = -(rawAngle - as5600Offset);
+      if (angle > 180.0f) {
+        angle -= 360.0f;
+      } else if (angle <= -180.0f) {
+        angle += 360.0f;
+      }
+      as5600Angle = angle;
+      as5600AngleValid = true;
+      Serial.print("AS5600 angle: ");
+      Serial.println(angle, 2);
+    }
+  }
+  if (homingYToZero && as5600AngleValid) {
+    Serial.println("Homing X to zero...");
+    const float absAngle = (as5600Angle < 0.0f) ? -as5600Angle : as5600Angle;
+    if (absAngle <= kXHomeToleranceDeg) {
+      homingYToZero = false;
+      stepperY.setSpeed(0.0f);
+    } else {
+      const float direction = (as5600Angle > 0.0f) ? -1.0f : 1.0f;
+      stepperY.setSpeed(direction * kXHomeSpeed);
+    }
+    stepperY.runSpeed();
   }
 
   if (telemetry.receive()) {
@@ -171,6 +203,11 @@ void loop()
           stepperX.move(delta);
           speedMode = false;
         }
+        break;
+      }
+      case kCmdMoveYToZero: {
+        homingYToZero = true;
+        speedMode = true;
         break;
       }
       case kCmdMoveY: {
