@@ -269,6 +269,23 @@ DEV_HTML = """<!doctype html>
           <div class="status" id="cameraStatus">Idle</div>
         </div>
         <div class="card">
+          <h2>YOLO (Person Only)</h2>
+          <div class="toggle">
+            <label for="yoloEnabled">Enable YOLO</label>
+            <input id="yoloEnabled" type="checkbox" {% if settings.yoloEnabled %}checked{% endif %} />
+          </div>
+          <label for="yoloModel">Model path</label>
+          <input id="yoloModel" type="text" value="{{ settings.yoloModel }}" />
+          <label for="yoloConf">Confidence</label>
+          <input id="yoloConf" type="number" min="0" max="1" step="0.01" value="{{ settings.yoloConf }}" />
+          <label for="yoloImgsz">Image size</label>
+          <input id="yoloImgsz" type="number" min="320" max="1280" step="32" value="{{ settings.yoloImgSz }}" />
+          <label for="yoloInferEvery">Infer every N frames</label>
+          <input id="yoloInferEvery" type="number" min="1" max="30" value="{{ settings.yoloInferEvery }}" />
+          <button onclick="applyYolo()">Apply YOLO Settings</button>
+          <div class="status" id="yoloStatus">Idle</div>
+        </div>
+        <div class="card">
           <h2>Notes</h2>
           <p class="status">Left stick X controls X. Right stick Y controls Y. Speeds are clamped to 16-bit signed values.</p>
           <p class="status">If you lose connection, press Send Stop or disable updates.</p>
@@ -347,6 +364,23 @@ DEV_HTML = """<!doctype html>
         document.getElementById("cameraStatus").textContent = data.status;
       }
 
+      function collectYoloSettings() {
+        return {
+          yoloEnabled: document.getElementById("yoloEnabled").checked,
+          yoloModel: document.getElementById("yoloModel").value,
+          yoloConf: Number(document.getElementById("yoloConf").value) || 0,
+          yoloImgSz: Number(document.getElementById("yoloImgsz").value) || 0,
+          yoloInferEvery: Number(document.getElementById("yoloInferEvery").value) || 1,
+        };
+      }
+
+      async function applyYolo() {
+        const payload = collectYoloSettings();
+        const data = await postJson("/api/yolo", payload);
+        document.getElementById("yoloStatus").textContent = data.status || data.error || "Updated";
+        await saveSettings(payload);
+      }
+
       function collectDevSettings() {
         return {
           maxSpeedX: Number(document.getElementById("maxSpeedX").value) || 0,
@@ -365,6 +399,11 @@ DEV_HTML = """<!doctype html>
           cameraWidth: Number(document.getElementById("camWidth").value) || 0,
           cameraHeight: Number(document.getElementById("camHeight").value) || 0,
           cameraFps: Number(document.getElementById("camFps").value) || 0,
+          yoloEnabled: document.getElementById("yoloEnabled").checked,
+          yoloModel: document.getElementById("yoloModel").value,
+          yoloConf: Number(document.getElementById("yoloConf").value) || 0,
+          yoloImgSz: Number(document.getElementById("yoloImgsz").value) || 0,
+          yoloInferEvery: Number(document.getElementById("yoloInferEvery").value) || 1,
         };
       }
 
@@ -466,6 +505,12 @@ DEV_HTML = """<!doctype html>
         "#fireMode, #fireButton, #fireAxis, #fireThreshold, #camWidth, #camHeight, #camFps"
       ).forEach((el) => {
         el.addEventListener("change", () => saveSettings(collectDevSettings()).catch(() => {}));
+      });
+
+      document.querySelectorAll(
+        "#yoloEnabled, #yoloModel, #yoloConf, #yoloImgsz, #yoloInferEvery"
+      ).forEach((el) => {
+        el.addEventListener("change", () => applyYolo().catch(() => {}));
       });
 
       update();
@@ -593,6 +638,10 @@ CONTROL_HTML = """<!doctype html>
           <span>Enable gamepad</span>
           <input id="enableGamepad" type="checkbox" {% if settings.enableSend %}checked{% endif %} />
         </label>
+        <label>
+          <span>Enable YOLO</span>
+          <input id="enableYolo" type="checkbox" {% if settings.yoloEnabled %}checked{% endif %} />
+        </label>
         <button onclick="setPower(true)">Power On</button>
         <button onclick="setPower(false)">Power Off</button>
         <button class="secondary" onclick="sendFire()">Fire</button>
@@ -610,6 +659,7 @@ CONTROL_HTML = """<!doctype html>
         invertY: {{ "true" if settings.invertY else "false" }},
         swapAxes: {{ "true" if settings.swapAxes else "false" }},
         enableSend: {{ "true" if settings.enableSend else "false" }},
+        yoloEnabled: {{ "true" if settings.yoloEnabled else "false" }},
         fireMode: "{{ settings.fireMode }}",
         fireButton: {{ settings.fireButton }},
         fireAxis: {{ settings.fireAxis }},
@@ -656,6 +706,12 @@ CONTROL_HTML = """<!doctype html>
         await postJson("/api/settings", payload);
       }
 
+      async function setYoloEnabled(stateValue) {
+        const data = await postJson("/api/yolo", { yoloEnabled: stateValue });
+        const status = data.status || data.error || "YOLO updated";
+        document.getElementById("controlStatus").textContent = status;
+      }
+
       function deadzone(value, dz) {
         const abs = Math.abs(value);
         if (abs < dz) return 0;
@@ -672,12 +728,15 @@ CONTROL_HTML = """<!doctype html>
         if (typeof data.invertY === "boolean") config.invertY = data.invertY;
         if (typeof data.swapAxes === "boolean") config.swapAxes = data.swapAxes;
         if (typeof data.enableSend === "boolean") config.enableSend = data.enableSend;
+        if (typeof data.yoloEnabled === "boolean") config.yoloEnabled = data.yoloEnabled;
         if (typeof data.fireMode === "string") config.fireMode = data.fireMode;
         if (typeof data.fireButton === "number") config.fireButton = data.fireButton;
         if (typeof data.fireAxis === "number") config.fireAxis = data.fireAxis;
         if (typeof data.fireThreshold === "number") config.fireThreshold = data.fireThreshold;
         const enable = document.getElementById("enableGamepad");
         enable.checked = Boolean(config.enableSend);
+        const enableYolo = document.getElementById("enableYolo");
+        enableYolo.checked = Boolean(config.yoloEnabled);
       }
 
       async function refreshSettings() {
@@ -762,6 +821,12 @@ CONTROL_HTML = """<!doctype html>
         saveSettings({ enableSend: config.enableSend }).catch(() => {});
       });
 
+      document.getElementById("enableYolo").addEventListener("change", (event) => {
+        config.yoloEnabled = event.target.checked;
+        setYoloEnabled(config.yoloEnabled).catch(() => {});
+        saveSettings({ yoloEnabled: config.yoloEnabled }).catch(() => {});
+      });
+
       window.addEventListener("pageshow", () => {
         refreshSettings();
       });
@@ -798,6 +863,9 @@ latest_frame = None
 capture_stop = threading.Event()
 capture_thread = None
 yolo_model = None
+yolo_model_path = "yolov8n.pt"
+yolo_lock = threading.Lock()
+yolo_enabled = True
 yolo_conf = 0.25
 yolo_imgsz = 640
 yolo_device = "cuda"
@@ -823,6 +891,11 @@ DEFAULT_SETTINGS = {
   "cameraWidth": 640,
   "cameraHeight": 480,
   "cameraFps": 15,
+  "yoloEnabled": True,
+  "yoloModel": "yolov8n.pt",
+  "yoloConf": 0.25,
+  "yoloImgSz": 640,
+  "yoloInferEvery": 1,
 }
 
 def normalize_settings(values):
@@ -913,6 +986,51 @@ def api_settings():
     save_settings(settings)
     current = dict(settings)
   return jsonify(current)
+
+
+@app.route("/api/yolo", methods=["POST"])
+def api_yolo():
+  global yolo_model, yolo_model_path, yolo_enabled, yolo_conf, yolo_imgsz, yolo_infer_every
+  data = request.get_json(silent=True) or {}
+  if not isinstance(data, dict):
+    return jsonify(error="Invalid payload"), 400
+
+  enabled = bool(data.get("yoloEnabled", yolo_enabled))
+  model_path = str(data.get("yoloModel", yolo_model_path))
+  conf = float(data.get("yoloConf", yolo_conf))
+  imgsz = int(data.get("yoloImgSz", yolo_imgsz))
+  infer_every = int(data.get("yoloInferEvery", yolo_infer_every))
+
+  conf = max(0.0, min(conf, 1.0))
+  imgsz = max(320, min(imgsz, 1280))
+  infer_every = max(1, min(infer_every, 30))
+
+  try:
+    with yolo_lock:
+      if model_path != yolo_model_path:
+        new_model = YOLO(model_path)
+        if yolo_half:
+          new_model.to(yolo_device)
+        yolo_model = new_model
+        yolo_model_path = model_path
+
+      yolo_enabled = enabled
+      yolo_conf = conf
+      yolo_imgsz = imgsz
+      yolo_infer_every = infer_every
+  except Exception as exc:
+    return jsonify(error=f"Failed to load YOLO model: {exc}"), 400
+
+  with settings_lock:
+    settings["yoloEnabled"] = enabled
+    settings["yoloModel"] = model_path
+    settings["yoloConf"] = conf
+    settings["yoloImgSz"] = imgsz
+    settings["yoloInferEvery"] = infer_every
+    save_settings(settings)
+
+  status = "YOLO enabled" if enabled else "YOLO disabled"
+  return jsonify(status=f"{status} (person only)")
 
 
 @app.route("/api/power", methods=["POST"])
@@ -1008,14 +1126,24 @@ def capture_loop():
 
       image = np.asanyarray(color_frame.get_data())
       frame_idx += 1
-      if yolo_model is not None:
-        if yolo_infer_every <= 1 or frame_idx % yolo_infer_every == 0:
-          results = yolo_model.predict(
+      with yolo_lock:
+        enabled = yolo_enabled
+        model = yolo_model
+        conf = yolo_conf
+        imgsz = yolo_imgsz
+        device = yolo_device
+        half = yolo_half
+        infer_every = yolo_infer_every
+
+      if enabled and model is not None:
+        if infer_every <= 1 or frame_idx % infer_every == 0:
+          results = model.predict(
             image,
-            conf=yolo_conf,
-            imgsz=yolo_imgsz,
-            device=yolo_device,
-            half=yolo_half,
+            conf=conf,
+            imgsz=imgsz,
+            device=device,
+            half=half,
+            classes=[0],
             verbose=False,
           )
           last_annotated = results[0].plot()
@@ -1104,13 +1232,19 @@ def main():
     rs_height = settings.get("cameraHeight", args.rs_height)
     rs_fps = settings.get("cameraFps", args.rs_fps)
 
-  global yolo_model, yolo_conf, yolo_imgsz, yolo_device, yolo_half, yolo_infer_every
-  yolo_conf = args.conf
-  yolo_imgsz = args.imgsz
+  global yolo_model, yolo_model_path, yolo_enabled, yolo_conf, yolo_imgsz, yolo_device, yolo_half, yolo_infer_every
   yolo_device = args.device
   yolo_half = args.half
-  yolo_infer_every = max(1, args.infer_every)
-  yolo_model = YOLO(args.model)
+  with settings_lock:
+    yolo_enabled = bool(settings.get("yoloEnabled", True))
+    yolo_model_path = settings.get("yoloModel", args.model)
+    yolo_conf = float(settings.get("yoloConf", args.conf))
+    yolo_imgsz = int(settings.get("yoloImgSz", args.imgsz))
+    yolo_infer_every = int(settings.get("yoloInferEvery", args.infer_every))
+  yolo_conf = max(0.0, min(yolo_conf, 1.0))
+  yolo_imgsz = max(320, min(yolo_imgsz, 1280))
+  yolo_infer_every = max(1, yolo_infer_every)
+  yolo_model = YOLO(yolo_model_path)
   if yolo_half:
     yolo_model.to(yolo_device)
 
