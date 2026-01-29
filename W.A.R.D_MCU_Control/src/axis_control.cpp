@@ -16,27 +16,27 @@ void AxisControl::begin(float as5600Offset) {
     }
 }
 
-void AxisControl::configure(float maxSpeed, int16_t acceleration, long startPosition) {
-    setMaxSpeed(maxSpeed);
+void AxisControl::configure(float positionMaxSpeed, int16_t acceleration, long startPosition) {
+    setPositionMaxSpeed(positionMaxSpeed);
     setAcceleration(acceleration);
     setCurrentPosition(startPosition);
 }
 
-void AxisControl::setMaxSpeed(float speed) {
+void AxisControl::setPositionMaxSpeed(float speed) {
     m_stepper.setMaxSpeed(speed);
 }
 
-void AxisControl::setSpeed(int16_t speed) {
+void AxisControl::setSpeedModeSpeed(int16_t speed) {
     m_speed = speed;
     m_stepper.setSpeed(static_cast<float>(m_speed));
 }
 
-void AxisControl::setSpeedMode(bool enabled) {
-    m_speedMode = enabled;
+void AxisControl::setMode(Mode mode) {
+    m_mode = mode;
 }
 
-bool AxisControl::isSpeedMode() const {
-    return m_speedMode;
+AxisControl::Mode AxisControl::mode() const {
+    return m_mode;
 }
 
 void AxisControl::setAcceleration(int16_t acceleration) {
@@ -66,15 +66,15 @@ void AxisControl::holdPosition() {
 void AxisControl::stopAndHold() {
     stop();
     holdPosition();
-    setSpeed(0);
+    setSpeedModeSpeed(0);
 }
 
 void AxisControl::startHomingToZero() {
-    m_homingToZero = true;
+    m_mode = Mode::Homing;
 }
 
 bool AxisControl::isHoming() const {
-    return m_homingToZero;
+    return m_mode == Mode::Homing;
 }
 
 void AxisControl::update(uint32_t nowMs) {
@@ -98,12 +98,12 @@ void AxisControl::update(uint32_t nowMs) {
         }
     }
 
-    if (m_homingToZero && m_as5600AngleValid) {
+    if (m_mode == Mode::Homing && m_as5600AngleValid) {
         Serial.println("Homing X to zero...");
         const float absAngle = (m_as5600Angle < 0.0f) ? -m_as5600Angle : m_as5600Angle;
         if (absAngle <= HOME_TOLERANCE_DEG) {
-            m_homingToZero = false;
             m_stepper.setSpeed(0.0f);
+            m_mode = Mode::Speed;
         } else {
             const float direction = (m_as5600Angle > 0.0f) ? -1.0f : 1.0f;
             m_stepper.setSpeed(direction * HOME_SPEED);
@@ -112,11 +112,20 @@ void AxisControl::update(uint32_t nowMs) {
         return;
     }
 
-    if (m_speedMode) {
-        m_stepper.setSpeed(static_cast<float>(m_speed));
-        m_stepper.runSpeed();
-    } else {
-        m_stepper.run();
+    switch (m_mode) {
+        case Mode::Speed:
+            m_stepper.setSpeed(static_cast<float>(m_speed));
+            m_stepper.runSpeed();
+            break;
+        case Mode::Position:
+            m_stepper.run();
+            break;
+        case Mode::Idle:
+            break;
+        case Mode::Homing:
+            m_stepper.setSpeed(static_cast<float>(m_speed));
+            m_stepper.runSpeed();
+            break;
     }
 }
 

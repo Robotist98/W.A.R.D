@@ -9,21 +9,27 @@
 
 class AxisControl {
 public:
+    enum class Mode {
+        Position,
+        Speed,
+        Homing,
+        Idle
+    };
     // Create a step/dir axis; optionally enable AS5600 sensor + homing support.
     AxisControl(uint8_t stepPin, uint8_t dirPin, bool enableAs5600 = false);
 
     // Initialize hardware; pass sensor offset in degrees if AS5600 enabled.
     void begin(float as5600Offset = 0.0f);
-    // Configure max speed, acceleration, and optional start position.
-    void configure(float maxSpeed, int16_t acceleration, long startPosition = 0);
-    // Configure stepper max speed (steps/sec).
-    void setMaxSpeed(float speed);
+    // Configure position-mode max speed, acceleration, and optional start position.
+    void configure(float positionMaxSpeed, int16_t acceleration, long startPosition = 0);
+    // Configure position-mode max speed (steps/sec).
+    void setPositionMaxSpeed(float speed);
     // Set target speed for speed mode (steps/sec).
-    void setSpeed(int16_t speed);
-    // Enable/disable speed mode for update().
-    void setSpeedMode(bool enabled);
-    // True if speed mode is enabled.
-    bool isSpeedMode() const;
+    void setSpeedModeSpeed(int16_t speed);
+    // Set how update() drives the axis.
+    void setMode(Mode mode);
+    // Current update() mode.
+    Mode mode() const;
     // Set acceleration (steps/sec^2).
     void setAcceleration(int16_t acceleration);
     // Move relative by delta steps.
@@ -58,8 +64,7 @@ private:
     uint32_t m_lastAs5600ReadMs = 0;
     float m_as5600Angle = 0.0f;
     bool m_as5600AngleValid = false;
-    bool m_homingToZero = false;
-    bool m_speedMode = false;
+    Mode m_mode = Mode::Position;
     static constexpr uint32_t kAs5600ReadIntervalMs = 100;
 
 

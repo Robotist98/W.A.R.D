@@ -78,8 +78,8 @@ void loop()
       case CAN_CMD_STOP: {
         axisX.stopAndHold();
         axisY.stopAndHold();
-        axisX.setSpeedMode(true);
-        axisY.setSpeedMode(true);
+        axisX.setMode(AxisControl::Mode::Speed);
+        axisY.setMode(AxisControl::Mode::Speed);
         digitalWrite(MAIN_POWER_PIN, LOW);
         break;
       }
@@ -95,8 +95,8 @@ void loop()
         }
         axisX.move(delta);
         axisY.move(delta);
-        axisX.setSpeedMode(false);
-        axisY.setSpeedMode(false);
+        axisX.setMode(AxisControl::Mode::Position);
+        axisY.setMode(AxisControl::Mode::Position);
         break;
       }
       case CAN_ID_SET_ACCEL: {
@@ -119,23 +119,23 @@ void loop()
         int16_t delta = 0;
         if (readInt16(0, delta)) {
           axisX.move(delta);
-          axisX.setSpeedMode(false);
-          axisY.setSpeedMode(false);
+          axisX.setMode(AxisControl::Mode::Position);
+          axisY.setMode(AxisControl::Mode::Position);
         }
         break;
       }
       case CAN_ID_MOVE_Y_TO_ZERO: {
         axisY.startHomingToZero();
-        axisX.setSpeedMode(true);
-        axisY.setSpeedMode(true);
+        axisX.setMode(AxisControl::Mode::Speed);
+        axisY.setMode(AxisControl::Mode::Homing);
         break;
       }
       case CAN_ID_MOVE_Y: {
         int16_t delta = 0;
         if (readInt16(0, delta)) {
           axisY.move(delta);
-          axisX.setSpeedMode(false);
-          axisY.setSpeedMode(false);
+          axisX.setMode(AxisControl::Mode::Position);
+          axisY.setMode(AxisControl::Mode::Position);
         }
         break;
       }
@@ -143,10 +143,10 @@ void loop()
         int16_t newX = 0;
         int16_t newY = 0;
         if (readInt16(0, newX) && readInt16(2, newY)) {
-          axisX.setSpeed(newX);
-          axisY.setSpeed(newY);
-          axisX.setSpeedMode(true);
-          axisY.setSpeedMode(true);
+          axisX.setSpeedModeSpeed(newX);
+          axisY.setSpeedModeSpeed(newY);
+          axisX.setMode(AxisControl::Mode::Speed);
+          axisY.setMode(AxisControl::Mode::Speed);
         }
         break;
       }

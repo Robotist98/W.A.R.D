@@ -194,10 +194,10 @@ DEV_HTML = """<!doctype html>
       <div class="grid">
         <div class="card">
           <h2>Speed Mapping</h2>
-          <label for="maxSpeedX">Max speed X (steps/sec)</label>
-          <input id="maxSpeedX" type="number" value="{{ settings.maxSpeedX }}" min="0" max="2000" />
-          <label for="maxSpeedY">Max speed Y (steps/sec)</label>
-          <input id="maxSpeedY" type="number" value="{{ settings.maxSpeedY }}" min="0" max="2000" />
+          <label for="speedModeMaxX">Speed mode max X (steps/sec)</label>
+          <input id="speedModeMaxX" type="number" value="{{ settings.speedModeMaxX }}" min="0" max="2000" />
+          <label for="speedModeMaxY">Speed mode max Y (steps/sec)</label>
+          <input id="speedModeMaxY" type="number" value="{{ settings.speedModeMaxY }}" min="0" max="2000" />
           <label for="accelX">Acceleration X (steps/sec^2)</label>
           <input id="accelX" type="number" value="{{ settings.accelX }}" min="0" max="5000" />
           <label for="accelY">Acceleration Y (steps/sec^2)</label>
@@ -383,8 +383,8 @@ DEV_HTML = """<!doctype html>
 
       function collectDevSettings() {
         return {
-          maxSpeedX: Number(document.getElementById("maxSpeedX").value) || 0,
-          maxSpeedY: Number(document.getElementById("maxSpeedY").value) || 0,
+          speedModeMaxX: Number(document.getElementById("speedModeMaxX").value) || 0,
+          speedModeMaxY: Number(document.getElementById("speedModeMaxY").value) || 0,
           accelX: Number(document.getElementById("accelX").value) || 0,
           accelY: Number(document.getElementById("accelY").value) || 0,
           deadzone: Number(document.getElementById("deadzone").value) || 0,
@@ -409,8 +409,8 @@ DEV_HTML = """<!doctype html>
 
       function getConfig() {
         return {
-          maxSpeedX: Number(document.getElementById("maxSpeedX").value) || 0,
-          maxSpeedY: Number(document.getElementById("maxSpeedY").value) || 0,
+          speedModeMaxX: Number(document.getElementById("speedModeMaxX").value) || 0,
+          speedModeMaxY: Number(document.getElementById("speedModeMaxY").value) || 0,
           deadzone: Number(document.getElementById("deadzone").value) || 0,
           invertX: document.getElementById("invertX").checked,
           invertY: document.getElementById("invertY").checked,
@@ -443,8 +443,8 @@ DEV_HTML = """<!doctype html>
         if (config.invertX) axisX *= -1;
         if (config.invertY) axisY *= -1;
 
-        const xSpeed = Math.round(axisX * config.maxSpeedX);
-        const ySpeed = Math.round(axisY * config.maxSpeedY);
+        const xSpeed = Math.round(axisX * config.speedModeMaxX);
+        const ySpeed = Math.round(axisY * config.speedModeMaxY);
 
         document.getElementById("axisX").textContent = axisX.toFixed(2);
         document.getElementById("axisY").textContent = axisY.toFixed(2);
@@ -501,7 +501,7 @@ DEV_HTML = """<!doctype html>
       });
 
       document.querySelectorAll(
-        "#maxSpeedX, #maxSpeedY, #accelX, #accelY, #deadzone, #invertX, #invertY, #swapAxes, #enableSend," +
+        "#speedModeMaxX, #speedModeMaxY, #accelX, #accelY, #deadzone, #invertX, #invertY, #swapAxes, #enableSend," +
         "#fireMode, #fireButton, #fireAxis, #fireThreshold, #camWidth, #camHeight, #camFps"
       ).forEach((el) => {
         el.addEventListener("change", () => saveSettings(collectDevSettings()).catch(() => {}));
@@ -652,8 +652,8 @@ CONTROL_HTML = """<!doctype html>
     </div>
     <script>
       const config = {
-        maxSpeedX: {{ settings.maxSpeedX }},
-        maxSpeedY: {{ settings.maxSpeedY }},
+        speedModeMaxX: {{ settings.speedModeMaxX }},
+        speedModeMaxY: {{ settings.speedModeMaxY }},
         deadzone: {{ settings.deadzone }},
         invertX: {{ "true" if settings.invertX else "false" }},
         invertY: {{ "true" if settings.invertY else "false" }},
@@ -721,8 +721,8 @@ CONTROL_HTML = """<!doctype html>
 
       function applySettings(data) {
         if (!data) return;
-        if (typeof data.maxSpeedX === "number") config.maxSpeedX = data.maxSpeedX;
-        if (typeof data.maxSpeedY === "number") config.maxSpeedY = data.maxSpeedY;
+        if (typeof data.speedModeMaxX === "number") config.speedModeMaxX = data.speedModeMaxX;
+        if (typeof data.speedModeMaxY === "number") config.speedModeMaxY = data.speedModeMaxY;
         if (typeof data.deadzone === "number") config.deadzone = data.deadzone;
         if (typeof data.invertX === "boolean") config.invertX = data.invertX;
         if (typeof data.invertY === "boolean") config.invertY = data.invertY;
@@ -770,8 +770,8 @@ CONTROL_HTML = """<!doctype html>
         if (config.invertX) axisX *= -1;
         if (config.invertY) axisY *= -1;
 
-        const xSpeed = Math.round(axisX * config.maxSpeedX);
-        const ySpeed = Math.round(axisY * config.maxSpeedY);
+        const xSpeed = Math.round(axisX * config.speedModeMaxX);
+        const ySpeed = Math.round(axisY * config.speedModeMaxY);
 
         const now = performance.now();
         const payload = `${xSpeed},${ySpeed}`;
@@ -875,8 +875,8 @@ settings_lock = threading.Lock()
 SETTINGS_PATH = os.path.join(os.path.dirname(__file__), "gamepad_settings_rs_yolo.json")
 
 DEFAULT_SETTINGS = {
-  "maxSpeedX": 600,
-  "maxSpeedY": 500,
+  "speedModeMaxX": 600,
+  "speedModeMaxY": 500,
   "accelX": 300,
   "accelY": 250,
   "deadzone": 0.08,
@@ -900,8 +900,12 @@ DEFAULT_SETTINGS = {
 
 def normalize_settings(values):
   mapped = dict(values)
-  if "maxSpeedX" not in values and "basicSpeed" in values:
-    mapped["maxSpeedX"] = values.get("basicSpeed", mapped.get("maxSpeedX", 0))
+  if "speedModeMaxX" not in values and "maxSpeedX" in values:
+    mapped["speedModeMaxX"] = values.get("maxSpeedX", mapped.get("speedModeMaxX", 0))
+  if "speedModeMaxY" not in values and "maxSpeedY" in values:
+    mapped["speedModeMaxY"] = values.get("maxSpeedY", mapped.get("speedModeMaxY", 0))
+  if "speedModeMaxX" not in values and "basicSpeed" in values:
+    mapped["speedModeMaxX"] = values.get("basicSpeed", mapped.get("speedModeMaxX", 0))
   if "deadzone" not in values and "basicDeadzone" in values:
     mapped["deadzone"] = values.get("basicDeadzone", mapped.get("deadzone", 0))
   if "invertY" not in values and "basicInvertY" in values:

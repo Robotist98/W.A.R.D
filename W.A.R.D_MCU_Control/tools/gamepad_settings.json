@@ -13,7 +13,7 @@
   "fireThreshold": 0.6,
   "invertX": true,
   "invertY": true,
-  "maxSpeedX": 1000,
-  "maxSpeedY": 250,
+  "speedModeMaxX": 1000,
+  "speedModeMaxY": 250,
   "swapAxes": false
 }
