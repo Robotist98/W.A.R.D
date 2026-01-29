@@ -23,6 +23,8 @@ def start_mjpeg_server(
     port: int,
     get_rgb_frame,
     get_depth_frame,
+    stream_fps: int,
+    jpeg_quality: int,
 ) -> HTTPServer:
     class MJPEGHandler(BaseHTTPRequestHandler):
         def log_message(self, format: str, *args) -> None:
@@ -64,7 +66,9 @@ def start_mjpeg_server(
                     if frame is None:
                         time.sleep(0.01)
                         continue
-                    ok, jpg = cv2.imencode(".jpg", frame)
+                    ok, jpg = cv2.imencode(
+                        ".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), jpeg_quality]
+                    )
                     if not ok:
                         continue
                     data = jpg.tobytes()
@@ -73,7 +77,8 @@ def start_mjpeg_server(
                     self.wfile.write(f"Content-Length: {len(data)}\r\n\r\n".encode())
                     self.wfile.write(data)
                     self.wfile.write(b"\r\n")
-                    time.sleep(0.01)
+                    if stream_fps > 0:
+                        time.sleep(1.0 / stream_fps)
             except (BrokenPipeError, ConnectionResetError):
                 return
 
@@ -89,12 +94,20 @@ def run(
     height: int,
     fps: int,
     conf: float,
+    imgsz: int,
+    infer_every: int,
+    device: str,
+    half: bool,
     display: bool,
     stream: bool,
     host: str,
     port: int,
+    stream_fps: int,
+    jpeg_quality: int,
 ) -> None:
     model = YOLO(model_path)
+    if half:
+        model.to(device)
     pipeline = build_pipeline(width, height, fps)
     align = rs.align(rs.stream.color)
     latest = {"rgb": None, "depth": None}
@@ -110,9 +123,13 @@ def run(
             return latest["depth"]
 
     if stream:
-        server = start_mjpeg_server(host, port, get_rgb, get_depth)
+        server = start_mjpeg_server(
+            host, port, get_rgb, get_depth, stream_fps, jpeg_quality
+        )
 
     try:
+        frame_idx = 0
+        last_annotated = None
         while True:
             frames = pipeline.wait_for_frames()
             aligned_frames = align.process(frames)
@@ -128,8 +145,20 @@ def run(
                 cv2.COLORMAP_JET,
             )
 
-            results = model.predict(image, conf=conf, verbose=False)
-            annotated = results[0].plot()
+            frame_idx += 1
+            if infer_every <= 1 or frame_idx % infer_every == 0:
+                results = model.predict(
+                    image,
+                    conf=conf,
+                    imgsz=imgsz,
+                    device=device,
+                    half=half,
+                    verbose=False,
+                )
+                annotated = results[0].plot()
+                last_annotated = annotated
+            else:
+                annotated = last_annotated if last_annotated is not None else image
 
             with lock:
                 latest["rgb"] = annotated
@@ -155,10 +184,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--height", type=int, default=480)
     parser.add_argument("--fps", type=int, default=30)
     parser.add_argument("--conf", type=float, default=0.25)
+    parser.add_argument("--imgsz", type=int, default=640, help="YOLO inference size")
+    parser.add_argument(
+        "--infer-every",
+        type=int,
+        default=1,
+        help="Run inference every N frames (higher = lower load)",
+    )
+    parser.add_argument("--device", default="cuda", help="Inference device")
+    parser.add_argument("--half", action="store_true", help="Use FP16 if supported")
     parser.add_argument("--headless", action="store_true", help="Disable local display")
     parser.add_argument("--stream", action="store_true", help="Enable MJPEG streaming")
     parser.add_argument("--host", default="0.0.0.0", help="Stream bind host")
     parser.add_argument("--port", type=int, default=8080, help="Stream port")
+    parser.add_argument("--stream-fps", type=int, default=15, help="MJPEG FPS cap")
+    parser.add_argument(
+        "--jpeg-quality", type=int, default=80, help="MJPEG JPEG quality (1-100)"
+    )
     return parser.parse_args()
 
 
@@ -170,10 +212,16 @@ def main() -> None:
         args.height,
         args.fps,
         args.conf,
+        args.imgsz,
+        max(1, args.infer_every),
+        args.device,
+        args.half,
         display=not args.headless,
         stream=args.stream,
         host=args.host,
         port=args.port,
+        stream_fps=max(0, args.stream_fps),
+        jpeg_quality=max(1, min(100, args.jpeg_quality)),
     )
 
 

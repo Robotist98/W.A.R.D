@@ -1,0 +1,23 @@
+{
+  "accelX": 300,
+  "accelY": 250,
+  "cameraFps": 15,
+  "cameraHeight": 480,
+  "cameraWidth": 640,
+  "deadzone": 0.08,
+  "enableSend": true,
+  "fireAxis": 5,
+  "fireButton": 0,
+  "fireMode": "button",
+  "fireThreshold": 0.6,
+  "invertX": false,
+  "invertY": true,
+  "maxSpeedX": 600,
+  "maxSpeedY": 500,
+  "swapAxes": false,
+  "yoloConf": 0.25,
+  "yoloEnabled": false,
+  "yoloImgSz": 640,
+  "yoloInferEvery": 1,
+  "yoloModel": "yolov8n.pt"
+}
