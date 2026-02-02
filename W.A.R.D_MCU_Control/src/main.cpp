@@ -17,6 +17,20 @@ constexpr int16_t kYAccel = 250;
 constexpr float kAs5600Offset = 29.0f;
 constexpr float kXMaxSpeed = 1000.0f;
 constexpr float kYMaxSpeed = 800.0f;
+constexpr uint32_t kCanResetCooldownMs = 500;
+
+static void resetCanBus(uint32_t nowMs) {
+  static uint32_t lastResetMs = 0;
+  if (nowMs - lastResetMs < kCanResetCooldownMs) {
+    return;
+  }
+  lastResetMs = nowMs;
+
+  Serial.println("Resetting CAN bus after RX overflow");
+  telemetry.end();
+  delay(5);
+  telemetry.begin(CAN_BAUDRATE);
+}
 
 bool readInt16(size_t offset, int16_t &value) {
   uint16_t raw = 0;
@@ -81,6 +95,7 @@ void loop()
     Serial.print("CAN RX overflow: ");
     Serial.print(rx0Overflow ? "RX0 " : "");
     Serial.println(rx1Overflow ? "RX1" : "");
+    resetCanBus(nowMs);
   }
 
   const bool homingYToZero = axisY.isHoming();
@@ -91,6 +106,8 @@ void loop()
 
   if (telemetry.receive()) {
     const uint32_t cmd = telemetry.getLastReceivedId();
+    Serial.print("Received CAN ID: 0x");
+    Serial.println(cmd, HEX);
     switch (cmd) {
       case CAN_ID_SET_CONFIG_X: {
         uint8_t configCmd = 0;
