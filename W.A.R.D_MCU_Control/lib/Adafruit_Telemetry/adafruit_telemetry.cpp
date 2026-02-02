@@ -307,4 +307,17 @@ bool Telemetry::getString(size_t offset, char* str, size_t strSize)
     // Extract a null-terminated string from the internal receive buffer.
     return UniversalPacker::unpackString(m_receivedData, offset, str, strSize, m_receivedSize);
 }
+
+uint8_t Telemetry::readErrorFlags()
+{
+    return Adafruit_MCP2515::readErrorFlags();
+}
+
+bool Telemetry::readRxOverflowFlags(bool& rx0Overflow, bool& rx1Overflow)
+{
+    const uint8_t flags = readErrorFlags();
+    rx0Overflow = (flags & 0x40) != 0;
+    rx1Overflow = (flags & 0x80) != 0;
+    return rx0Overflow || rx1Overflow;
+}
 // End of telemetry.cpp

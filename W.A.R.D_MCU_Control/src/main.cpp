@@ -12,7 +12,6 @@ AxisControl axisX(X_AXIS_STEP_PIN, X_AXIS_DIR_PIN);
 AxisControl axisY(Y_AXIS_STEP_PIN, Y_AXIS_DIR_PIN, true);
 Servo triggerServo;
 
-constexpr long kStepDelta = 100;
 constexpr int16_t kXAccel = 300;
 constexpr int16_t kYAccel = 250;
 constexpr float kAs5600Offset = 29.0f;
@@ -28,11 +27,24 @@ bool readInt16(size_t offset, int16_t &value) {
   return true;
 }
 
+bool readConfigPayload(uint8_t &cmd, int16_t &value) {
+  if (!telemetry.getUint8(0, cmd)) {
+    return false;
+  }
+  return readInt16(1, value) || readInt16(2, value);
+}
+
+void applyAxisConfig(AxisControl &axis, uint8_t cmd, int16_t value) {
+  if (cmd == CAN_COM_READ_SPEED) {
+    axis.setSpeedModeSpeed(value);
+  } else if (cmd == CAN_COM_READ_ACCEL) {
+    axis.setAcceleration(value);
+  }
+}
 void setup() {
   Serial.begin(115200);
   //while(!Serial) delay(10);
 
-  Serial.println("MCP2515 Sender test!");
   pinMode(13, OUTPUT);
   pinMode(MAIN_POWER_PIN, OUTPUT);
 
@@ -58,13 +70,18 @@ void setup() {
   // delay(500);
   // triggerServo.write(180);
 
-  Serial.println("Setup complete.");
-
 }
 
 void loop() 
 {
   const uint32_t nowMs = millis();
+  bool rx0Overflow = false;
+  bool rx1Overflow = false;
+  if (telemetry.readRxOverflowFlags(rx0Overflow, rx1Overflow)) {
+    Serial.print("CAN RX overflow: ");
+    Serial.print(rx0Overflow ? "RX0 " : "");
+    Serial.println(rx1Overflow ? "RX1" : "");
+  }
 
   const bool homingYToZero = axisY.isHoming();
   if (!homingYToZero) {
@@ -75,47 +92,23 @@ void loop()
   if (telemetry.receive()) {
     const uint32_t cmd = telemetry.getLastReceivedId();
     switch (cmd) {
-      case CAN_CMD_STOP: {
-        axisX.stopAndHold();
-        axisY.stopAndHold();
-        axisX.setMode(AxisControl::Mode::Speed);
-        axisY.setMode(AxisControl::Mode::Speed);
-        digitalWrite(MAIN_POWER_PIN, LOW);
-        break;
-      }
-      case CAN_CMD_PTM_START_FW:
-      case CAN_CMD_PTM_START_REV: {
-        digitalWrite(MAIN_POWER_PIN, HIGH);
-        int16_t delta = static_cast<int16_t>(kStepDelta);
-        if (!readInt16(0, delta)) {
-          delta = static_cast<int16_t>(kStepDelta);
-        }
-        if (cmd == CAN_CMD_PTM_START_REV) {
-          delta = static_cast<int16_t>(-delta);
-        }
-        axisX.move(delta);
-        axisY.move(delta);
-        axisX.setMode(AxisControl::Mode::Position);
-        axisY.setMode(AxisControl::Mode::Position);
-        break;
-      }
-      case CAN_ID_SET_ACCEL: {
-        int16_t newX = 0;
-        int16_t newY = 0;
-        if (readInt16(0, newX) && readInt16(2, newY)) {
-          axisX.setAcceleration(newX);
-          axisY.setAcceleration(newY);
+      case CAN_ID_SET_CONFIG_X: {
+        uint8_t configCmd = 0;
+        int16_t value = 0;
+        if (readConfigPayload(configCmd, value)) {
+          applyAxisConfig(axisX, configCmd, value);
         }
         break;
       }
-      case CAN_ID_MAINPOWER: {
-        uint8_t state = 0;
-        if (telemetry.getUint8(0, state)) {
-          digitalWrite(MAIN_POWER_PIN, state ? HIGH : LOW);
+      case CAN_ID_SET_CONFIG_Y: {
+        uint8_t configCmd = 0;
+        int16_t value = 0;
+        if (readConfigPayload(configCmd, value)) {
+          applyAxisConfig(axisY, configCmd, value);
         }
         break;
       }
-      case CAN_ID_MOVE_X: {
+      case CAN_ID_RUNMOVE_X: {
         int16_t delta = 0;
         if (readInt16(0, delta)) {
           axisX.move(delta);
@@ -125,12 +118,13 @@ void loop()
         break;
       }
       case CAN_ID_MOVE_Y_TO_ZERO: {
-        axisY.startHomingToZero();
-        axisX.setMode(AxisControl::Mode::Speed);
-        axisY.setMode(AxisControl::Mode::Homing);
+        if (axisY.startHomingToZero()) {
+          axisX.setMode(AxisControl::Mode::Speed);
+          axisY.setMode(AxisControl::Mode::Homing);
+        }
         break;
       }
-      case CAN_ID_MOVE_Y: {
+      case CAN_ID_RUNMOVE_Y: {
         int16_t delta = 0;
         if (readInt16(0, delta)) {
           axisY.move(delta);
@@ -139,7 +133,7 @@ void loop()
         }
         break;
       }
-      case CAN_ID_SET_SPEED: {
+      case CAN_ID_RUNSPEED_XY: {
         int16_t newX = 0;
         int16_t newY = 0;
         if (readInt16(0, newX) && readInt16(2, newY)) {
@@ -160,6 +154,14 @@ void loop()
           }
           triggerServo.write(angle);
         }
+        break;
+      }
+      case ADDRESS_FIRMWARE_VERSION: {
+        packer.clear();
+        packer.addUint8(static_cast<uint8_t>(FIRMWARE_VERSION_MAJOR));
+        packer.addUint8(static_cast<uint8_t>(FIRMWARE_VERSION_MINOR));
+        packer.addUint8(static_cast<uint8_t>(FIRMWARE_VERSION_PATCH));
+        telemetry.send(REPLY_FIRMWARE_VERSION, packer);
         break;
       }
       default:

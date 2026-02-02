@@ -269,6 +269,20 @@ public:
      */
     bool getString(size_t offset, char* str, size_t strSize);
 
+    /**
+     * @brief Read MCP2515 error flags register (EFLG).
+     * @return Raw EFLG value.
+     */
+    uint8_t readErrorFlags();
+
+    /**
+     * @brief Check for RX buffer overflow flags in EFLG.
+     * @param[out] rx0Overflow True if RX0 overflow occurred.
+     * @param[out] rx1Overflow True if RX1 overflow occurred.
+     * @return true if either overflow flag is set.
+     */
+    bool readRxOverflowFlags(bool& rx0Overflow, bool& rx1Overflow);
+
 private:
     /**
      * @brief Optional convenience value storing a telemetry interval (ms).

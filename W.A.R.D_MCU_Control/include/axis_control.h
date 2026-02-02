@@ -19,7 +19,7 @@ public:
     AxisControl(uint8_t stepPin, uint8_t dirPin, bool enableAs5600 = false);
 
     // Initialize hardware; pass sensor offset in degrees if AS5600 enabled.
-    void begin(float as5600Offset = 0.0f);
+    bool begin(float as5600Offset = 0.0f);
     // Configure position-mode max speed, acceleration, and optional start position.
     void configure(float positionMaxSpeed, int16_t acceleration, long startPosition = 0);
     // Configure position-mode max speed (steps/sec).
@@ -44,8 +44,10 @@ public:
     void stopAndHold();
     // Update sensor + motion; handles homing if active.
     void update(uint32_t nowMs);
+    // Read AS5600 angle; returns NAN if not available/invalid/not refreshed.
+    float readAs5600();
     // Begin homing to zero using AS5600 angle.
-    void startHomingToZero();
+    bool startHomingToZero();
     // True while homing is active.
     bool isHoming() const;
     // Set the stepper position without motion.
@@ -53,6 +55,9 @@ public:
     // Current stepper position.
     long currentPosition();
 private:
+    bool updateHoming();
+    void runMotion();
+
     AccelStepper m_stepper;
     int16_t m_speed = 0;
     int16_t m_acceleration = 0;
@@ -66,8 +71,6 @@ private:
     bool m_as5600AngleValid = false;
     Mode m_mode = Mode::Position;
     static constexpr uint32_t kAs5600ReadIntervalMs = 100;
-
-
 };
 
 
