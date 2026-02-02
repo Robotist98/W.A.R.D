@@ -109,7 +109,21 @@ void loop()
     Serial.print("Received CAN ID: 0x");
     Serial.println(cmd, HEX);
     switch (cmd) {
-      case CAN_ID_SET_CONFIG_X: {
+      case CAN_ID_MAINPOWER: 
+      {
+        uint8_t powerState = 0;
+        if (telemetry.getUint8(0, powerState)) {
+          if (powerState) {
+            digitalWrite(MAIN_POWER_PIN, HIGH);
+          } else {
+            digitalWrite(MAIN_POWER_PIN, LOW);
+          }
+        }
+        break;
+      }
+      
+      case CAN_ID_SET_CONFIG_X: 
+      {
         uint8_t configCmd = 0;
         int16_t value = 0;
         if (readConfigPayload(configCmd, value)) {
@@ -117,7 +131,9 @@ void loop()
         }
         break;
       }
-      case CAN_ID_SET_CONFIG_Y: {
+      
+      case CAN_ID_SET_CONFIG_Y: 
+      {
         uint8_t configCmd = 0;
         int16_t value = 0;
         if (readConfigPayload(configCmd, value)) {
@@ -125,7 +141,9 @@ void loop()
         }
         break;
       }
-      case CAN_ID_RUNMOVE_X: {
+      
+      case CAN_ID_RUNMOVE_X: 
+      {
         int16_t delta = 0;
         if (readInt16(0, delta)) {
           axisX.move(delta);
@@ -134,14 +152,18 @@ void loop()
         }
         break;
       }
-      case CAN_ID_MOVE_Y_TO_ZERO: {
+      
+      case CAN_ID_MOVE_Y_TO_ZERO: 
+      {
         if (axisY.startHomingToZero()) {
           axisX.setMode(AxisControl::Mode::Speed);
           axisY.setMode(AxisControl::Mode::Homing);
         }
         break;
       }
-      case CAN_ID_RUNMOVE_Y: {
+      
+      case CAN_ID_RUNMOVE_Y: 
+      {
         int16_t delta = 0;
         if (readInt16(0, delta)) {
           axisY.move(delta);
@@ -150,7 +172,9 @@ void loop()
         }
         break;
       }
-      case CAN_ID_RUNSPEED_XY: {
+      
+      case CAN_ID_RUNSPEED_XY: 
+      {
         int16_t newX = 0;
         int16_t newY = 0;
         if (readInt16(0, newX) && readInt16(2, newY)) {
@@ -161,7 +185,9 @@ void loop()
         }
         break;
       }
-      case CAN_ID_SERVO_TRIGGER: {
+      
+      case CAN_ID_SERVO_TRIGGER: 
+      {
         uint8_t angle = 0;
         if (telemetry.getUint8(0, angle)) {
           if (angle < MIN_SERVO_ANGLE) {
@@ -173,7 +199,9 @@ void loop()
         }
         break;
       }
-      case ADDRESS_FIRMWARE_VERSION: {
+      
+      case ADDRESS_FIRMWARE_VERSION: 
+      {
         packer.clear();
         packer.addUint8(static_cast<uint8_t>(FIRMWARE_VERSION_MAJOR));
         packer.addUint8(static_cast<uint8_t>(FIRMWARE_VERSION_MINOR));
@@ -181,6 +209,7 @@ void loop()
         telemetry.send(REPLY_FIRMWARE_VERSION, packer);
         break;
       }
+      
       default:
         break;
     }
