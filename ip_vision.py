@@ -19,7 +19,7 @@ if os.environ.get("LD_PRELOAD") != LIB_GL_DISPATCH:
 
 import numpy as np
 
-if not hasattr(np, "bool"):
+if "bool" not in np.__dict__:
     np.bool = bool
 
 import threading
@@ -34,8 +34,7 @@ from ultralytics import YOLO
 # Configuration
 # ---------------------------------------------------------------------------
 
-CAMERA_URL = "rtsp://169.254.3.154/stream2"
-
+CAMERA_URL = "rtsp://192.168.144.26:8554/main.264"
 # TensorRT model generated on this Jetson.
 MODEL_PATH = Path(__file__).parent / "yolov8n.engine"
 
@@ -58,7 +57,7 @@ WINDOW_NAME = "Low-latency YOLO"
 
 def make_gstreamer_pipeline() -> str:
     """
-    Receive H.264 RTSP over UDP, decode using the Jetson hardware decoder,
+    Receive H.265 RTSP over TCP, decode using the Jetson hardware decoder,
     and expose BGR frames to OpenCV.
 
     appsink drop=true and max-buffers=1 prevent old frames accumulating.
@@ -66,12 +65,12 @@ def make_gstreamer_pipeline() -> str:
 
     return (
         f'rtspsrc location="{CAMERA_URL}" '
-        "latency=0 "
-        "protocols=udp "
+        "latency=100 "
+        "protocols=tcp "
         "drop-on-latency=true "
         "buffer-mode=none ! "
-        "rtph264depay ! "
-        "h264parse ! "
+        "rtph265depay ! "
+        "h265parse ! "
         "nvv4l2decoder "
         "disable-dpb=true "
         "enable-max-performance=true ! "
@@ -243,7 +242,7 @@ def main() -> int:
         return 1
 
     print(f"Loading TensorRT model: {MODEL_PATH}")
-    model = YOLO(str(MODEL_PATH))
+    model = YOLO(str(MODEL_PATH), task="detect")
 
     pipeline = make_gstreamer_pipeline()
 
