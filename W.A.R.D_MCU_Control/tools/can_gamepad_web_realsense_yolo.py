@@ -1146,7 +1146,7 @@ def capture_loop():
             conf=conf,
             imgsz=imgsz,
             device=device,
-            half=half,
+            quantize=16 if half else None,
             classes=[0],
             verbose=False,
           )

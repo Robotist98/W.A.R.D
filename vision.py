@@ -152,7 +152,7 @@ def run(
                     conf=conf,
                     imgsz=imgsz,
                     device=device,
-                    half=half,
+                    quantize=16 if half else None,
                     verbose=False,
                 )
                 annotated = results[0].plot()

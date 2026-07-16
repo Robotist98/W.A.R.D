@@ -282,7 +282,7 @@ def main() -> int:
                 iou=IOU_THRESHOLD,
                 classes=CLASSES,
                 device=0,
-                half=True,
+                quantize=16,
                 verbose=False,
             )
 
