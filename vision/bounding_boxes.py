@@ -16,6 +16,62 @@ def get_class_name(class_names, class_id: int) -> str:
         return str(class_id)
 
 
+def draw_bbox_position_values(bbox):
+    x1, y1, x2, y2 = bbox.astype(int)
+
+    return x1, y1, x2, y2
+
+
+def get_bbox_center(x1: int, y1: int, x2: int, y2: int):
+    return (x1 + x2) // 2, (y1 + y2) // 2
+
+
+def draw_label_block(frame, x: int, y: int, lines) -> None:
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = 0.45
+    thickness = 1
+    padding = 4
+    line_gap = 3
+
+    sizes = [
+        cv2.getTextSize(line, font, font_scale, thickness)
+        for line in lines
+    ]
+    text_width = max(size[0][0] for size in sizes)
+    text_height = sum(size[0][1] for size in sizes)
+    baseline = max(size[1] for size in sizes)
+    block_height = text_height + baseline + padding * 2 + line_gap * (len(lines) - 1)
+    block_width = text_width + padding * 2
+
+    frame_height, frame_width = frame.shape[:2]
+    block_x = max(0, min(x, frame_width - block_width))
+    block_bottom_y = max(block_height, y)
+    block_top_y = block_bottom_y - block_height
+
+    cv2.rectangle(
+        frame,
+        (block_x, block_top_y),
+        (block_x + block_width, block_bottom_y),
+        (0, 255, 0),
+        -1,
+    )
+
+    text_y = block_top_y + padding
+    for line, (text_size, line_baseline) in zip(lines, sizes):
+        text_y += text_size[1]
+        cv2.putText(
+            frame,
+            line,
+            (block_x + padding, text_y),
+            font,
+            font_scale,
+            (0, 0, 0),
+            thickness,
+            cv2.LINE_AA,
+        )
+        text_y += line_baseline + line_gap
+
+
 def draw_detections(
     frame,
     result,
@@ -47,7 +103,12 @@ def draw_detections(
         if class_name != displayed_class_name:
             continue
 
-        label = f"{class_name} {confidence:.2f}"
+        center_x, center_y = get_bbox_center(x1, y1, x2, y2)
+        label_lines = [
+            f"{class_name} {confidence:.2f}",
+            f"bbox ({x1}, {y1})-({x2}, {y2})",
+            f"centre ({center_x}, {center_y})",
+        ]
 
         cv2.rectangle(
             frame,
@@ -57,34 +118,25 @@ def draw_detections(
             2,
         )
 
-        text_size, baseline = cv2.getTextSize(
-            label,
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
-            1,
-        )
-
-        text_width, text_height = text_size
-        text_y = max(y1, text_height + baseline + 2)
-
-        cv2.rectangle(
+        cv2.circle(
             frame,
-            (x1, text_y - text_height - baseline - 4),
-            (x1 + text_width + 4, text_y),
-            (0, 255, 0),
+            (center_x, center_y),
+            4,
+            (0, 0, 255),
             -1,
         )
 
-        cv2.putText(
+        cv2.drawMarker(
             frame,
-            label,
-            (x1 + 2, text_y - baseline - 2),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
-            (0, 0, 0),
+            (center_x, center_y),
+            (0, 0, 255),
+            cv2.MARKER_CROSS,
+            14,
             1,
             cv2.LINE_AA,
         )
+
+        draw_label_block(frame, x1, y1, label_lines)
 
 
 def draw_status(
