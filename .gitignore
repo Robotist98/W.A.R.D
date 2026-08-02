@@ -1,0 +1,5 @@
+# Model artifacts
+/models/
+*.engine
+*.onnx
+*.pt
