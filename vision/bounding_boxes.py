@@ -5,6 +5,8 @@ ensure_runtime_environment()
 
 import cv2
 
+from .tracker import Detection
+
 
 def get_class_name(class_names, class_id: int) -> str:
     if hasattr(class_names, "get"):
@@ -24,6 +26,45 @@ def draw_bbox_position_values(bbox):
 
 def get_bbox_center(x1: int, y1: int, x2: int, y2: int):
     return (x1 + x2) // 2, (y1 + y2) // 2
+
+
+def extract_detections(
+    result,
+    class_names,
+    displayed_class_name="person",
+):
+    detections = []
+
+    if result.boxes is None or len(result.boxes) == 0:
+        return detections
+
+    boxes = result.boxes.xyxy.cpu().numpy()
+    confidences = result.boxes.conf.cpu().numpy()
+    class_ids = result.boxes.cls.cpu().numpy().astype(int)
+
+    for box, confidence, class_id in zip(
+        boxes,
+        confidences,
+        class_ids,
+    ):
+        x1, y1, x2, y2 = draw_bbox_position_values(box)
+        class_name = get_class_name(class_names, class_id)
+
+        if class_name != displayed_class_name:
+            continue
+
+        center = get_bbox_center(x1, y1, x2, y2)
+        detections.append(
+            Detection(
+                bbox=(x1, y1, x2, y2),
+                confidence=float(confidence),
+                class_id=int(class_id),
+                class_name=class_name,
+                center=center,
+            )
+        )
+
+    return detections
 
 
 def draw_label_block(frame, x: int, y: int, lines) -> None:
@@ -72,6 +113,56 @@ def draw_label_block(frame, x: int, y: int, lines) -> None:
         text_y += line_baseline + line_gap
 
 
+def draw_bbox_overlay(frame, bbox, center, label_lines) -> None:
+    x1, y1, x2, y2 = bbox
+    center_x, center_y = center
+
+    cv2.rectangle(
+        frame,
+        (x1, y1),
+        (x2, y2),
+        (0, 255, 0),
+        2,
+    )
+
+    cv2.circle(
+        frame,
+        (center_x, center_y),
+        4,
+        (0, 0, 255),
+        -1,
+    )
+
+    cv2.drawMarker(
+        frame,
+        (center_x, center_y),
+        (0, 0, 255),
+        cv2.MARKER_CROSS,
+        14,
+        1,
+        cv2.LINE_AA,
+    )
+
+    draw_label_block(frame, x1, y1, label_lines)
+
+
+def draw_track(frame, track) -> None:
+    x1, y1, x2, y2 = track.bbox
+    center_x, center_y = track.center
+    label_lines = [
+        f"ID {track.track_id} {track.class_name} {track.confidence:.2f}",
+        f"bbox ({x1}, {y1})-({x2}, {y2})",
+        f"centre ({center_x}, {center_y})",
+    ]
+
+    draw_bbox_overlay(frame, track.bbox, track.center, label_lines)
+
+
+def draw_tracks(frame, tracks) -> None:
+    for track in tracks:
+        draw_track(frame, track)
+
+
 def draw_detections(
     frame,
     result,
@@ -85,58 +176,21 @@ def draw_detections(
     overhead.
     """
 
-    if result.boxes is None or len(result.boxes) == 0:
-        return
+    detections = extract_detections(
+        result,
+        class_names,
+        displayed_class_name,
+    )
 
-    boxes = result.boxes.xyxy.cpu().numpy()
-    confidences = result.boxes.conf.cpu().numpy()
-    class_ids = result.boxes.cls.cpu().numpy().astype(int)
-
-    for box, confidence, class_id in zip(
-        boxes,
-        confidences,
-        class_ids,
-    ):
-        x1, y1, x2, y2 = box.astype(int)
-
-        class_name = get_class_name(class_names, class_id)
-        if class_name != displayed_class_name:
-            continue
-
-        center_x, center_y = get_bbox_center(x1, y1, x2, y2)
+    for detection in detections:
+        x1, y1, x2, y2 = detection.bbox
+        center_x, center_y = detection.center
         label_lines = [
-            f"{class_name} {confidence:.2f}",
+            f"{detection.class_name} {detection.confidence:.2f}",
             f"bbox ({x1}, {y1})-({x2}, {y2})",
             f"centre ({center_x}, {center_y})",
         ]
-
-        cv2.rectangle(
-            frame,
-            (x1, y1),
-            (x2, y2),
-            (0, 255, 0),
-            2,
-        )
-
-        cv2.circle(
-            frame,
-            (center_x, center_y),
-            4,
-            (0, 0, 255),
-            -1,
-        )
-
-        cv2.drawMarker(
-            frame,
-            (center_x, center_y),
-            (0, 0, 255),
-            cv2.MARKER_CROSS,
-            14,
-            1,
-            cv2.LINE_AA,
-        )
-
-        draw_label_block(frame, x1, y1, label_lines)
+        draw_bbox_overlay(frame, detection.bbox, detection.center, label_lines)
 
 
 def draw_status(

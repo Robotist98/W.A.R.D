@@ -11,9 +11,10 @@ ensure_runtime_environment()
 
 import cv2
 
-from vision.bounding_boxes import draw_detections, draw_status
+from vision.bounding_boxes import draw_status, draw_tracks, extract_detections
 from vision.camera_input import LatestFrameCamera, make_gstreamer_pipeline
 from vision.detector import YoloDetector
+from vision.tracker import CentroidTracker
 
 
 # ---------------------------------------------------------------------------
@@ -40,19 +41,15 @@ USE_HALF_PRECISION = True
 
 WINDOW_NAME = "Low-latency YOLO"
 
+TRACK_MAX_DISTANCE = 120.0
+TRACK_MAX_MISSED_FRAMES = 10
+
 
 def wait_for_first_frame(camera: LatestFrameCamera) -> None:
     print("Waiting for the first frame...")
 
     while camera.get_latest_frame() is None:
         time.sleep(0.01)
-
-
-def count_detections(result) -> int:
-    if result.boxes is None:
-        return 0
-
-    return len(result.boxes)
 
 
 def main() -> int:
@@ -87,6 +84,11 @@ def main() -> int:
 
     print("Detection running. Press Q or Escape to exit.")
 
+    tracker = CentroidTracker(
+        max_distance=TRACK_MAX_DISTANCE,
+        max_missed_frames=TRACK_MAX_MISSED_FRAMES,
+    )
+
     displayed_frames = 0
     fps_start_time = time.perf_counter()
     display_fps = 0.0
@@ -100,11 +102,13 @@ def main() -> int:
 
             result, inference_ms = detector.predict(frame)
 
-            draw_detections(
-                frame,
+            detections = extract_detections(
                 result,
                 detector.class_names,
             )
+            tracks = tracker.update(detections)
+
+            draw_tracks(frame, tracks)
 
             displayed_frames += 1
             elapsed = time.perf_counter() - fps_start_time
@@ -118,7 +122,7 @@ def main() -> int:
                 frame,
                 inference_ms,
                 display_fps,
-                count_detections(result),
+                len(tracks),
             )
 
             cv2.imshow(WINDOW_NAME, frame)
