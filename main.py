@@ -23,7 +23,7 @@ from vision.detector import YoloDetector
 CAMERA_URL = "rtsp://169.254.3.154/stream2"
 
 # TensorRT model generated on this Jetson.
-MODEL_PATH = Path(__file__).parent / "yolov8n.engine"
+MODEL_PATH = Path(__file__).parent / "models" / "yolov8n.engine"
 
 # Must normally match the size used when exporting the TensorRT engine.
 INFERENCE_SIZE = 640
