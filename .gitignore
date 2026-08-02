@@ -1,8 +1,8 @@
 # Model artifacts
-/models/
-*.engine
-*.onnx
-*.pt
+# /models/
+# *.engine
+# *.onnx
+# *.pt
 
 # Python cache files
 __pycache__/
