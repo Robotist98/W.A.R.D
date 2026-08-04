@@ -11,10 +11,11 @@ ensure_runtime_environment()
 
 import cv2
 
-from vision.bounding_boxes import draw_status, draw_tracks, extract_detections
+from vision.bounding_boxes import draw_status, draw_tracks, extract_detections, get_frame_centre_point
 from vision.camera_input import LatestFrameCamera, make_gstreamer_pipeline
 from vision.detector import YoloDetector
 from vision.tracker import CentroidTracker
+from algorithm import pid
 
 
 # ---------------------------------------------------------------------------
@@ -44,6 +45,13 @@ WINDOW_NAME = "Low-latency YOLO"
 TRACK_MAX_DISTANCE = 120.0
 TRACK_MAX_MISSED_FRAMES = 10
 
+KP = 0.1
+KI = 0.01
+KD = 0.05
+
+x_axis_pid = pid.PID(KP, KI, KD)
+y_axis_pid = pid.PID(KP, KI, KD)
+
 
 def wait_for_first_frame(camera: LatestFrameCamera) -> None:
     print("Waiting for the first frame...")
@@ -70,7 +78,6 @@ def main() -> int:
     )
 
     pipeline = make_gstreamer_pipeline(CAMERA_URL)
-
     print(f"Opening camera: {CAMERA_URL}")
     camera = LatestFrameCamera(pipeline)
 
@@ -81,13 +88,9 @@ def main() -> int:
         return 1
 
     wait_for_first_frame(camera)
-
     print("Detection running. Press Q or Escape to exit.")
 
-    tracker = CentroidTracker(
-        max_distance=TRACK_MAX_DISTANCE,
-        max_missed_frames=TRACK_MAX_MISSED_FRAMES,
-    )
+    tracker = CentroidTracker(max_distance=TRACK_MAX_DISTANCE, max_missed_frames=TRACK_MAX_MISSED_FRAMES)
 
     displayed_frames = 0
     fps_start_time = time.perf_counter()
@@ -95,21 +98,17 @@ def main() -> int:
 
     try:
         while True:
+            # Gets frame from the camera thread.
             frame = camera.get_latest_frame()
-
             if frame is None:
                 continue
 
+            # Run inference on the frame and update the tracker with the detections.
             result, inference_ms = detector.predict(frame)
-
-            detections = extract_detections(
-                result,
-                detector.class_names,
-            )
+            detections = extract_detections(result,detector.class_names,)
             tracks = tracker.update(detections)
 
-            draw_tracks(frame, tracks)
-
+            # FPS calculation and display.
             displayed_frames += 1
             elapsed = time.perf_counter() - fps_start_time
 
@@ -118,17 +117,24 @@ def main() -> int:
                 displayed_frames = 0
                 fps_start_time = time.perf_counter()
 
-            draw_status(
-                frame,
-                inference_ms,
-                display_fps,
-                len(tracks),
-            )
+            draw_tracks(frame, tracks)
+            draw_status(frame, inference_ms, display_fps, len(tracks),)
+
+            #PID control for the first track (if available)
+            if tracks:
+                first_track = tracks[0]
+                frame_centre = get_frame_centre_point(frame)
+                x_target = frame_centre[0] - first_track.center[0]
+                y_target = frame_centre[1] - first_track.center[1]
+
+                dt = 1.0 / display_fps if display_fps > 0 else 0.01
+                x_output = x_axis_pid.update(x_target, x_error, dt)
+                y_output = y_axis_pid.update(y_target, y_error, dt)
+
+                print(f"PID Output - X: {x_output:.2f}, Y: {y_output:.2f}")
 
             cv2.imshow(WINDOW_NAME, frame)
-
             key = cv2.waitKey(1) & 0xFF
-
             if key in (ord("q"), 27):
                 break
 
@@ -143,4 +149,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+
+    print("Starting W.A.R.D. vision system...")
     sys.exit(main())

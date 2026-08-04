@@ -215,3 +215,7 @@ def draw_status(
         2,
         cv2.LINE_AA,
     )
+
+def get_frame_centre_point(frame):
+    height, width = frame.shape[:2]
+    return (width // 2, height // 2)
