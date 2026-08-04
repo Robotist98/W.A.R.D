@@ -1,6 +1,6 @@
 import math
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 
 BBox = Tuple[int, int, int, int]
@@ -90,6 +90,16 @@ class CentroidTracker:
         visible_tracks.sort(key=lambda track: track.track_id)
         return visible_tracks
 
+    def priority_target(
+        self,
+        tracks: Optional[Iterable[Track]] = None,
+        class_name: Optional[str] = None,
+    ) -> Optional[int]:
+        if tracks is None:
+            tracks = self.tracks.values()
+
+        return priority_target(tracks, class_name=class_name)
+
     def _create_track(self, detection: Detection) -> Track:
         track = Track(
             track_id=self.next_track_id,
@@ -148,3 +158,24 @@ class CentroidTracker:
 
 def center_distance(first: Point, second: Point) -> float:
     return math.hypot(first[0] - second[0], first[1] - second[1])
+
+
+def bbox_area(bbox: BBox) -> int:
+    x1, y1, x2, y2 = bbox
+    return max(0, x2 - x1) * max(0, y2 - y1)
+
+
+def priority_target(
+    tracks: Iterable[Track],
+    class_name: Optional[str] = None,
+) -> Optional[int]:
+    tracks = [
+        track
+        for track in tracks
+        if class_name is None or track.class_name == class_name
+    ]
+
+    if not tracks:
+        return None
+
+    return max(tracks, key=lambda track: bbox_area(track.bbox)).track_id

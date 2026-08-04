@@ -16,6 +16,7 @@ from vision.camera_input import LatestFrameCamera, make_gstreamer_pipeline
 from vision.detector import YoloDetector
 from vision.tracker import CentroidTracker
 from algorithm import pid
+from communications.canbus import WardCanBus, CanBusConfig, clamp
 
 
 # ---------------------------------------------------------------------------
@@ -45,12 +46,69 @@ WINDOW_NAME = "Low-latency YOLO"
 TRACK_MAX_DISTANCE = 120.0
 TRACK_MAX_MISSED_FRAMES = 10
 
+TARGETTING = True  # Set to True to enable PID control for the priority target.
+
+CANBUS_ENABLED = False  # Set to True to enable CAN bus communication for PID output.
+
+X_STEPPER_MAX_SPEED = 1000
+Y_STEPPER_MAX_SPEED = 800
+X_STEPPER_SPEED_SCALE = 1.0
+Y_STEPPER_SPEED_SCALE = 1.0
+X_STEPPER_DIRECTION = 1
+Y_STEPPER_DIRECTION = 1
+STEPPER_SPEED_DEADBAND = 2
+
 KP = 0.1
 KI = 0.01
 KD = 0.05
 
-x_axis_pid = pid.PID(KP, KI, KD)
-y_axis_pid = pid.PID(KP, KI, KD)
+canbus_config = CanBusConfig(
+    interface="socketcan",
+    channel="can0",
+    bitrate=500000,
+    timeout=1.0,
+)
+
+canbus = None
+
+
+def get_canbus() -> WardCanBus:
+    global canbus
+
+    if canbus is None:
+        canbus = WardCanBus(config=canbus_config)
+
+    return canbus
+
+
+def pid_output_to_stepper_speed(output: float,scale: float,max_speed: int,direction: int) -> int:
+    speed = int(round(output * scale * direction))
+    if abs(speed) <= STEPPER_SPEED_DEADBAND:
+        return 0
+    return clamp(speed, -max_speed, max_speed)
+
+
+def canbus_send(x_output: float, y_output: float) -> None:
+    x_speed = pid_output_to_stepper_speed(
+        x_output,
+        X_STEPPER_SPEED_SCALE,
+        X_STEPPER_MAX_SPEED,
+        X_STEPPER_DIRECTION,
+    )
+    y_speed = pid_output_to_stepper_speed(
+        y_output,
+        Y_STEPPER_SPEED_SCALE,
+        Y_STEPPER_MAX_SPEED,
+        Y_STEPPER_DIRECTION,
+    )
+
+    get_canbus().set_speed(x_speed, y_speed)
+    print(f"CAN speed sent - X: {x_speed} steps/s, Y: {y_speed} steps/s")
+
+
+def canbus_stop() -> None:
+    if canbus is not None:
+        canbus.stop()
 
 
 def wait_for_first_frame(camera: LatestFrameCamera) -> None:
@@ -61,6 +119,9 @@ def wait_for_first_frame(camera: LatestFrameCamera) -> None:
 
 
 def main() -> int:
+    x_axis_pid = pid.PID(KP, KI, KD)
+    y_axis_pid = pid.PID(KP, KI, KD)
+
     if not MODEL_PATH.exists():
         print(f"Error: model does not exist: {MODEL_PATH}")
         print("Export your trained .pt model to TensorRT first.")
@@ -105,7 +166,7 @@ def main() -> int:
 
             # Run inference on the frame and update the tracker with the detections.
             result, inference_ms = detector.predict(frame)
-            detections = extract_detections(result,detector.class_names,)
+            detections = extract_detections(result, detector.class_names)
             tracks = tracker.update(detections)
 
             # FPS calculation and display.
@@ -118,20 +179,41 @@ def main() -> int:
                 fps_start_time = time.perf_counter()
 
             draw_tracks(frame, tracks)
-            draw_status(frame, inference_ms, display_fps, len(tracks),)
+            draw_status(frame, inference_ms, display_fps, len(tracks))
 
-            #PID control for the first track (if available)
-            if tracks:
-                first_track = tracks[0]
-                frame_centre = get_frame_centre_point(frame)
-                x_target = frame_centre[0] - first_track.center[0]
-                y_target = frame_centre[1] - first_track.center[1]
+            # PID control for the priority target, if one is visible.
+            if TARGETTING:
+                target_id = tracker.priority_target(tracks, class_name="person")
+                priority_track = next(
+                    (track for track in tracks if track.track_id == target_id),
+                    None,
+                )
 
-                dt = 1.0 / display_fps if display_fps > 0 else 0.01
-                x_output = x_axis_pid.update(x_target, x_error, dt)
-                y_output = y_axis_pid.update(y_target, y_error, dt)
+                if priority_track is not None:
+                    frame_centre = get_frame_centre_point(frame)
+                    dt = 1.0 / display_fps if display_fps > 0 else 0.01
+                    x_output = x_axis_pid.update(
+                        frame_centre[0],
+                        priority_track.center[0],
+                        dt,
+                    )
+                    y_output = y_axis_pid.update(
+                        frame_centre[1],
+                        priority_track.center[1],
+                        dt,
+                    )
 
-                print(f"PID Output - X: {x_output:.2f}, Y: {y_output:.2f}")
+                    print(
+                        f"Priority Target ID: {priority_track.track_id}, "
+                        f"Center: {priority_track.center}, "
+                        f"BBox: {priority_track.bbox}, "
+                        f"PID Output - X: {x_output:.2f}, Y: {y_output:.2f}"
+                    )
+
+                    if CANBUS_ENABLED:
+                        canbus_send(x_output, y_output)
+                elif CANBUS_ENABLED:
+                    canbus_stop()
 
             cv2.imshow(WINDOW_NAME, frame)
             key = cv2.waitKey(1) & 0xFF
@@ -142,6 +224,12 @@ def main() -> int:
         print("\nStopping...")
 
     finally:
+        if CANBUS_ENABLED:
+            canbus_stop()
+
+        if canbus is not None:
+            canbus.close()
+
         camera.stop()
         cv2.destroyAllWindows()
 
