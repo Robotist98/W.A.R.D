@@ -32,6 +32,10 @@ void AxisControl::setSpeedModeSpeed(int16_t speed) {
     m_stepper.setSpeed(static_cast<float>(m_speed));
 }
 
+int16_t AxisControl::speedModeSpeed() const {
+    return m_speed;
+}
+
 void AxisControl::setMode(Mode mode) {
     m_mode = mode;
 }

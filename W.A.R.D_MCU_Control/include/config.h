@@ -9,6 +9,12 @@
 #define ADDRESS_FIRMWARE_VERSION 0x600
 #define REPLY_FIRMWARE_VERSION 0x601
 
+// Periodic MCU status frame, sent every 100 ms.
+// Payload: X speed (int16), Y speed (int16), power state (uint8),
+// X mode (uint8), Y mode (uint8), flags (uint8; bit 0 = Y homing).
+#define CAN_ID_STATUS_TELEMETRY 0x602
+#define CAN_STATUS_TELEMETRY_INTERVAL_MS 100
+
 #define CAN_ID_MAINPOWER 0x10
 #define CAN_CMD_MAINPOWER_OFF 0x00
 #define CAN_CMD_MAINPOWER_ON 0x01

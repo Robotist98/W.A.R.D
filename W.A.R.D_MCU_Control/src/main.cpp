@@ -48,6 +48,24 @@ bool readConfigPayload(uint8_t &cmd, int16_t &value) {
   return readInt16(1, value) || readInt16(2, value);
 }
 
+void sendStatusTelemetry(uint32_t nowMs) {
+  static uint32_t lastTelemetryMs = 0;
+  if (nowMs - lastTelemetryMs < CAN_STATUS_TELEMETRY_INTERVAL_MS) {
+    return;
+  }
+  lastTelemetryMs = nowMs;
+
+  // See CAN_ID_STATUS_TELEMETRY in config.h for the 8-byte payload layout.
+  packer.clear();
+  packer.addUint16(static_cast<uint16_t>(axisX.speedModeSpeed()));
+  packer.addUint16(static_cast<uint16_t>(axisY.speedModeSpeed()));
+  packer.addUint8(digitalRead(MAIN_POWER_PIN) == HIGH ? 1 : 0);
+  packer.addUint8(static_cast<uint8_t>(axisX.mode()));
+  packer.addUint8(static_cast<uint8_t>(axisY.mode()));
+  packer.addUint8(axisY.isHoming() ? 1 : 0);
+  telemetry.send(CAN_ID_STATUS_TELEMETRY, packer);
+}
+
 void applyAxisConfig(AxisControl &axis, uint8_t cmd, int16_t value) {
   if (cmd == CAN_COM_READ_SPEED) {
     axis.setSpeedModeSpeed(value);
@@ -103,6 +121,7 @@ void loop()
     axisX.update(nowMs);
   }
   axisY.update(nowMs);
+  sendStatusTelemetry(nowMs);
 
   if (telemetry.receive()) {
     const uint32_t cmd = telemetry.getLastReceivedId();

@@ -26,6 +26,8 @@ public:
     void setPositionMaxSpeed(float speed);
     // Set target speed for speed mode (steps/sec).
     void setSpeedModeSpeed(int16_t speed);
+    // Return the currently commanded speed-mode speed (steps/sec).
+    int16_t speedModeSpeed() const;
     // Set how update() drives the axis.
     void setMode(Mode mode);
     // Current update() mode.

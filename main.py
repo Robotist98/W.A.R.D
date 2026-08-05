@@ -48,17 +48,25 @@ TRACK_MAX_MISSED_FRAMES = 10
 
 TARGETTING = True  # Set to True to enable PID control for the priority target.
 
-CANBUS_ENABLED = False  # Set to True to enable CAN bus communication for PID output.
+CANBUS_ENABLED = True  # Set to True to enable CAN bus communication for PID output.
 
-X_STEPPER_MAX_SPEED = 1000
+X_STEPPER_MAX_SPEED = 3000
 Y_STEPPER_MAX_SPEED = 800
-X_STEPPER_SPEED_SCALE = 1.0
+X_STEPPER_SPEED_SCALE = 25.0
 Y_STEPPER_SPEED_SCALE = 1.0
+# Set to -1 if positive visual error needs negative X motor speed on this turret.
 X_STEPPER_DIRECTION = 1
 Y_STEPPER_DIRECTION = 1
-STEPPER_SPEED_DEADBAND = 2
+# Hold X still when the target is within this many image pixels of centre.
+# This is applied before PID/scaling, so the visual target—not motor speed—sets
+# the dead zone. Increase it if the target still chatters around centre.
+X_VISION_DEADBAND_PIXELS = 20
+Y_VISION_DEADBAND_PIXELS = 20
 
-KP = 0.1
+X_TARGET_OFFSET_PIXELS = 30
+Y_TARGET_OFFSET_PIXELS = 0
+
+KP = 0.2
 KI = 0.01
 KD = 0.05
 
@@ -81,10 +89,13 @@ def get_canbus() -> WardCanBus:
     return canbus
 
 
-def pid_output_to_stepper_speed(output: float,scale: float,max_speed: int,direction: int) -> int:
+def pid_output_to_stepper_speed(
+    output: float,
+    scale: float,
+    max_speed: int,
+    direction: int,
+) -> int:
     speed = int(round(output * scale * direction))
-    if abs(speed) <= STEPPER_SPEED_DEADBAND:
-        return 0
     return clamp(speed, -max_speed, max_speed)
 
 
@@ -192,16 +203,28 @@ def main() -> int:
                 if priority_track is not None:
                     frame_centre = get_frame_centre_point(frame)
                     dt = 1.0 / display_fps if display_fps > 0 else 0.01
-                    x_output = x_axis_pid.update(
-                        frame_centre[0],
-                        priority_track.center[0],
-                        dt,
-                    )
-                    y_output = y_axis_pid.update(
-                        frame_centre[1],
-                        priority_track.center[1],
-                        dt,
-                    )
+                    x_error_pixels = frame_centre[0] - priority_track.center[0] + X_TARGET_OFFSET_PIXELS
+                    y_error_pixels = frame_centre[1] - priority_track.center[1] + Y_TARGET_OFFSET_PIXELS
+                    if abs(x_error_pixels) <= X_VISION_DEADBAND_PIXELS:
+                        # Clear PID state so a prior correction cannot cause a
+                        # kick when the target later leaves the visual dead zone.
+                        x_axis_pid.reset()
+                        x_output = 0.0
+                    else:
+                        x_output = x_axis_pid.update(
+                            0,
+                            -x_error_pixels,
+                            dt,
+                        )
+                    if abs(y_error_pixels) <= Y_VISION_DEADBAND_PIXELS:
+                        y_axis_pid.reset()
+                        y_output = 0.0
+                    else:
+                        y_output = y_axis_pid.update(
+                            0,
+                            -y_error_pixels,
+                            dt,
+                        )
 
                     print(
                         f"Priority Target ID: {priority_track.track_id}, "
