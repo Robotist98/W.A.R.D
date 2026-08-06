@@ -50,9 +50,9 @@ TARGETTING = True  # Set to True to enable PID control for the priority target.
 
 CANBUS_ENABLED = True  # Set to True to enable CAN bus communication for PID output.
 
-X_STEPPER_MAX_SPEED = 5000
+X_STEPPER_MAX_SPEED = 6000
 Y_STEPPER_MAX_SPEED = 800
-X_STEPPER_SPEED_SCALE = 25.0
+X_STEPPER_SPEED_SCALE = 27.0
 Y_STEPPER_SPEED_SCALE = 1.0
 # Set to -1 if positive visual error needs negative X motor speed on this turret.
 X_STEPPER_DIRECTION = 1
@@ -60,17 +60,23 @@ Y_STEPPER_DIRECTION = 1
 # Hold X still when the target is within this many image pixels of centre.
 # This is applied before PID/scaling, so the visual target—not motor speed—sets
 # the dead zone. Increase it if the target still chatters around centre.
-X_VISION_DEADBAND_PIXELS = 5
-Y_VISION_DEADBAND_PIXELS = 5
+X_VISION_DEADBAND_PIXELS = 10
+Y_VISION_DEADBAND_PIXELS = 10
 
 X_TARGET_OFFSET_PIXELS = 80
 Y_TARGET_OFFSET_PIXELS = 0
 
 # Exponential moving average for the detected target centre before PID.  A
 # lower value smooths detector noise more, but also adds tracking delay.
-TARGET_CENTER_EMA_ALPHA = 0.5
+TARGET_CENTER_EMA_ALPHA = 0.2
 
-KP = 0.3
+# Aim ahead of a moving target to compensate for camera, inference, CAN and
+# motor latency.  Keep disabled until ordinary PID tracking is stable.
+TARGET_LEAD_ENABLED = True
+TARGET_LEAD_TIME_SECONDS = 0.10
+TARGET_LEAD_MAX_PIXELS = 30.0
+
+KP = 0.25
 KI = 0.00
 KD = 0.05
 
@@ -174,6 +180,7 @@ def main() -> int:
     last_pid_update_time = time.perf_counter()
     smoothed_target_id = None
     smoothed_target_centre = None
+    smoothed_target_velocity = (0.0, 0.0)
 
     try:
         while True:
@@ -224,6 +231,7 @@ def main() -> int:
                             float(detected_centre[0]),
                             float(detected_centre[1]),
                         )
+                        smoothed_target_velocity = (0.0, 0.0)
                     else:
                         # Smooth small frame-to-frame detector-centre jumps
                         # before they reach the PID (and especially its D term).
@@ -234,10 +242,42 @@ def main() -> int:
                             (1.0 - TARGET_CENTER_EMA_ALPHA) * previous_y
                             + TARGET_CENTER_EMA_ALPHA * detected_centre[1],
                         )
+                        smoothed_target_velocity = (
+                            (smoothed_target_centre[0] - previous_x) / dt,
+                            (smoothed_target_centre[1] - previous_y) / dt,
+                        )
+
+                    if TARGET_LEAD_ENABLED:
+                        # Cap the predicted displacement so a noisy detection
+                        # cannot make the turret jump far ahead of the target.
+                        lead_x = max(
+                            -TARGET_LEAD_MAX_PIXELS,
+                            min(
+                                smoothed_target_velocity[0]
+                                * TARGET_LEAD_TIME_SECONDS,
+                                TARGET_LEAD_MAX_PIXELS,
+                            ),
+                        )
+                        lead_y = max(
+                            -TARGET_LEAD_MAX_PIXELS,
+                            min(
+                                smoothed_target_velocity[1]
+                                * TARGET_LEAD_TIME_SECONDS,
+                                TARGET_LEAD_MAX_PIXELS,
+                            ),
+                        )
+                    else:
+                        lead_x = 0.0
+                        lead_y = 0.0
+
+                    aimed_centre = (
+                        smoothed_target_centre[0] + lead_x,
+                        smoothed_target_centre[1] + lead_y,
+                    )
 
                     frame_centre = get_frame_centre_point(frame)
-                    x_error_pixels = frame_centre[0] - smoothed_target_centre[0] + X_TARGET_OFFSET_PIXELS
-                    y_error_pixels = frame_centre[1] - smoothed_target_centre[1] + Y_TARGET_OFFSET_PIXELS
+                    x_error_pixels = frame_centre[0] - aimed_centre[0] + X_TARGET_OFFSET_PIXELS
+                    y_error_pixels = frame_centre[1] - aimed_centre[1] + Y_TARGET_OFFSET_PIXELS
                     if abs(x_error_pixels) <= X_VISION_DEADBAND_PIXELS:
                         # Clear PID state so a prior correction cannot cause a
                         # kick when the target later leaves the visual dead zone.
@@ -263,6 +303,7 @@ def main() -> int:
                         f"Priority Target ID: {priority_track.track_id}, "
                         f"Center: {detected_centre}, "
                         f"Smoothed center: {smoothed_target_centre}, "
+                        f"Lead: ({lead_x:.1f}, {lead_y:.1f}), "
                         f"BBox: {priority_track.bbox}, "
                         f"PID Output - X: {x_output:.2f}, Y: {y_output:.2f}"
                     )
@@ -274,6 +315,7 @@ def main() -> int:
                     # centre toward the last target's position.
                     smoothed_target_id = None
                     smoothed_target_centre = None
+                    smoothed_target_velocity = (0.0, 0.0)
                     if CANBUS_ENABLED:
                         canbus_stop()
 
