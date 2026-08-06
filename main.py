@@ -50,7 +50,7 @@ TARGETTING = True  # Set to True to enable PID control for the priority target.
 
 CANBUS_ENABLED = True  # Set to True to enable CAN bus communication for PID output.
 
-X_STEPPER_MAX_SPEED = 3000
+X_STEPPER_MAX_SPEED = 5000
 Y_STEPPER_MAX_SPEED = 800
 X_STEPPER_SPEED_SCALE = 25.0
 Y_STEPPER_SPEED_SCALE = 1.0
@@ -60,14 +60,18 @@ Y_STEPPER_DIRECTION = 1
 # Hold X still when the target is within this many image pixels of centre.
 # This is applied before PID/scaling, so the visual target—not motor speed—sets
 # the dead zone. Increase it if the target still chatters around centre.
-X_VISION_DEADBAND_PIXELS = 20
-Y_VISION_DEADBAND_PIXELS = 20
+X_VISION_DEADBAND_PIXELS = 5
+Y_VISION_DEADBAND_PIXELS = 5
 
-X_TARGET_OFFSET_PIXELS = 30
+X_TARGET_OFFSET_PIXELS = 80
 Y_TARGET_OFFSET_PIXELS = 0
 
-KP = 0.2
-KI = 0.01
+# Exponential moving average for the detected target centre before PID.  A
+# lower value smooths detector noise more, but also adds tracking delay.
+TARGET_CENTER_EMA_ALPHA = 0.5
+
+KP = 0.3
+KI = 0.00
 KD = 0.05
 
 canbus_config = CanBusConfig(
@@ -167,6 +171,9 @@ def main() -> int:
     displayed_frames = 0
     fps_start_time = time.perf_counter()
     display_fps = 0.0
+    last_pid_update_time = time.perf_counter()
+    smoothed_target_id = None
+    smoothed_target_centre = None
 
     try:
         while True:
@@ -179,6 +186,13 @@ def main() -> int:
             result, inference_ms = detector.predict(frame)
             detections = extract_detections(result, detector.class_names)
             tracks = tracker.update(detections)
+
+            # Use the real interval between control-loop updates.  The display
+            # FPS is intentionally averaged over a second and is unsuitable for
+            # the PID derivative/integral calculations.
+            pid_update_time = time.perf_counter()
+            dt = max(pid_update_time - last_pid_update_time, 1e-3)
+            last_pid_update_time = pid_update_time
 
             # FPS calculation and display.
             displayed_frames += 1
@@ -201,10 +215,29 @@ def main() -> int:
                 )
 
                 if priority_track is not None:
+                    detected_centre = priority_track.center
+                    if smoothed_target_id != priority_track.track_id:
+                        # Never blend a newly selected target with the previous
+                        # target's position.
+                        smoothed_target_id = priority_track.track_id
+                        smoothed_target_centre = (
+                            float(detected_centre[0]),
+                            float(detected_centre[1]),
+                        )
+                    else:
+                        # Smooth small frame-to-frame detector-centre jumps
+                        # before they reach the PID (and especially its D term).
+                        previous_x, previous_y = smoothed_target_centre
+                        smoothed_target_centre = (
+                            (1.0 - TARGET_CENTER_EMA_ALPHA) * previous_x
+                            + TARGET_CENTER_EMA_ALPHA * detected_centre[0],
+                            (1.0 - TARGET_CENTER_EMA_ALPHA) * previous_y
+                            + TARGET_CENTER_EMA_ALPHA * detected_centre[1],
+                        )
+
                     frame_centre = get_frame_centre_point(frame)
-                    dt = 1.0 / display_fps if display_fps > 0 else 0.01
-                    x_error_pixels = frame_centre[0] - priority_track.center[0] + X_TARGET_OFFSET_PIXELS
-                    y_error_pixels = frame_centre[1] - priority_track.center[1] + Y_TARGET_OFFSET_PIXELS
+                    x_error_pixels = frame_centre[0] - smoothed_target_centre[0] + X_TARGET_OFFSET_PIXELS
+                    y_error_pixels = frame_centre[1] - smoothed_target_centre[1] + Y_TARGET_OFFSET_PIXELS
                     if abs(x_error_pixels) <= X_VISION_DEADBAND_PIXELS:
                         # Clear PID state so a prior correction cannot cause a
                         # kick when the target later leaves the visual dead zone.
@@ -228,15 +261,21 @@ def main() -> int:
 
                     print(
                         f"Priority Target ID: {priority_track.track_id}, "
-                        f"Center: {priority_track.center}, "
+                        f"Center: {detected_centre}, "
+                        f"Smoothed center: {smoothed_target_centre}, "
                         f"BBox: {priority_track.bbox}, "
                         f"PID Output - X: {x_output:.2f}, Y: {y_output:.2f}"
                     )
 
                     if CANBUS_ENABLED:
                         canbus_send(x_output, y_output)
-                elif CANBUS_ENABLED:
-                    canbus_stop()
+                else:
+                    # Reset the filter so reacquiring a target cannot pull its
+                    # centre toward the last target's position.
+                    smoothed_target_id = None
+                    smoothed_target_centre = None
+                    if CANBUS_ENABLED:
+                        canbus_stop()
 
             cv2.imshow(WINDOW_NAME, frame)
             key = cv2.waitKey(1) & 0xFF
